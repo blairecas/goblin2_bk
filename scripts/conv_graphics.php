@@ -147,6 +147,27 @@ function GetArray ($img, $tdx, $tdy)
     fputs($f, "@packend\n\n");
 
     ////////////////////////////////////////////////////////////////////////////
+    // convert menu picture
+    ////////////////////////////////////////////////////////////////////////////
+
+    $img = imagecreatefrompng(pathinfo(__FILE__, PATHINFO_DIRNAME)."/../graphics/Menu.png");    
+    $arr = GetArray($img, 256, 256);
+    echo "Menu: ".($arr['last']+1)."\n";
+    fputs($f, "\nMenuData:\n");
+    fputs($f, "@packstart\n");
+    for ($t=0; $t<=$arr['last']; $t++)
+    {
+	    $tile = $arr['tiles'][$t];
+    	for ($i=0, $n=0, $l=count($tile); $i<$l; $i++)
+	    {
+    	    if ($n==0) fputs($f, "\t.byte\t");
+	        fputs($f, decoct($tile[$i]));
+	        if ($n<7 && $i<($l-1)) { fputs($f, ", "); $n++; } else { fputs($f, "\n"); $n=0; }
+        }
+    }
+    fputs($f, "@packend\n\n");
+
+    ////////////////////////////////////////////////////////////////////////////
     // end
     ////////////////////////////////////////////////////////////////////////////
 

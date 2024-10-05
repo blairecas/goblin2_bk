@@ -64,8 +64,16 @@ C_STATE_FALL	= 5.
 C_STATE_WAIT	= 6.
 C_STATE_OUT	= 7.
 
-C_SPR_PLEFT1	= 04.				; player spawn start sprite
+C_SPR_PLEFT1	= 04.
+C_SPR_PSPAWN1	= 18.				; player spawn start sprite
 C_SPR_GSPAWN1	= 13.				; ghosts spawn start sprite
 
+C_MAX_REMO	= 05.
 C_REMO_TIME	= 40.				; timer for bricks restore
 
+C_MODE_INIT	= 0
+C_MODE_MENU	= 1
+C_MODE_PRELEV	= 2
+C_MODE_LEVEL	= 3
+C_MODE_OVER	= 4
+C_MODE_WIN	= 5

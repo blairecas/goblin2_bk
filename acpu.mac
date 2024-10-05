@@ -46,11 +46,45 @@ Start:	mtps	#200
 	tst	@#177662				; read keyboard reg just in case
 	clr	bKeyCur					; (!) also clears bKeySpace
 
-	call	SetupTimer				; start drawing timer ajust for BK 0010
 	call	SetupLVaddr				; level addrs -> vaddr table
-	call	ShowInstr
+	call	SetupTimer				; start drawing timer ajust for BK 0010
+	clrb	bInstrShown
+	clrb	bGameMode
 
-	; level prepare
+; main cycle
+Main:	movb	bGameMode, R0
+	asl	R0
+	call	@GameProcedures(R0)
+	br	Main
+
+GameProcedures:
+	.word	MainInit, MainMenu, MainPreLev, MainLevel, MainOver, MainWin
+
+; ////////////////////////////////////////////////////////////////////////////
+
+; prepare menu
+MainInit:
+	call	MusicMute
+	call	FadeScreen
+	mov	#MenuData, R0
+	mov	#C_VADDR, R1
+	call	Unpack
+	movb	#C_MODE_MENU, bGameMode
+	return
+
+
+; menu
+MainMenu:
+	cmpb	bKeySpace, #C_KEY_SPACE
+	bne	99$
+	movb	#C_MODE_PRELEV, bGameMode
+99$:	return
+
+
+; level prepare
+MainPreLev:
+	call	ShowInstr
+	call	FadeScreen
 	call	LoadLevel
 	call	RemovedInit
 	call	DrawBorder
@@ -58,17 +92,19 @@ Start:	mtps	#200
 	call	ObjectsPrepare
 	clr	bFrame					; (!) also clears bFrame2
 	clr	bKeyCur					; (!) also clears bKeySpace
-	clr	UpdTileAddr
+	mov	#UpdTileTable, UpdTileAddr
+	movb	#C_MODE_LEVEL, bGameMode
+	return
 
 
-
-MainGame:
+; game procedures
+MainLevel:
 	; wait for timer
 	mov	#177710, R0
 	cmp	TimerLine, (R0)
 	bne	.-4
 	; level proc
-	call	MainLevel
+	call	LevelProc
 	; music
 	call	MusicPlay
 	; DEBUG: output frame cycles
@@ -83,83 +119,20 @@ MainGame:
 	call	PrintOctal
 30$:	; DEBUG: end
 	call	IncFrames
-	br	MainGame
-
-ObjectsPrepare:
-	mov	#Object, R0
-	call	ObjPrepare
-	mov	#ObjectEnd, R0
-	call	ObjPrepare
-	mov	#ObjectEnd+ObjectEnd-Object, R0
-	call	ObjPrepare
-	return
-
-ObjectsRestore:
-	mov	#ObjectEnd+ObjectEnd-Object, R0
-	call	ObjRestore
-	mov	#ObjectEnd, R0
-	call	ObjRestore
-	mov	#Object, R0
-	call	ObjRestore
-	return
-
-ObjectsSprite:
-	mov	#Object, R0
-	call	ObjSprite
-	mov	#ObjectEnd, R0
-	call	ObjSprite
-	mov	#ObjectEnd+ObjectEnd-Object, R0
-	call	ObjSprite
-	return
-
-MainLevel:
-	; even frame - drawing
-	bitb	#1, bFrame
-	bne	100$
-	call	ObjectsRestore				; restore background (reversed)
-	; frame #4 - check tile to update (taking box)
-	cmpb	bFrame, #4
-	bne	10$
-	mov	UpdTileAddr, R5
-	beq	10$
-	clr	UpdTileAddr
-	movb	(R5), R0
-	sub	#LevelC, R5
-	asl	R5
-	mov	Level2Vaddr(R5), R5
-	call	DrawTile
-10$:	call	ObjectsSprite				; draw sprites
-	return
-
-100$:	; frame #1 - prepare states
-	cmpb	bFrame, #1
-	bne	110$
-	call	PStatePrepare
-	call	GStatePrepare
-
-110$:	; odd frame - process states
-	call	PStateProcess
-	call	PStateWaitOut
-	call	GStateProcess
-	call	GStateWaitOut
-	call	ObjectsPrepare
-	call	CheckTurn
-	call	CheckSpace
-	call	RemovedProcess
 	return
 
 
-IncFrames:
-	incb	bFrame
-	cmpb	bFrame, #12.
-	blo	10$
-	clrb	bFrame
-10$:	incb	bFrame2
-	cmpb	bFrame2, #24.
-	blo	20$
-	clrb	bFrame2
-20$:	return
+; game over
+MainOver:
+	return
 
+
+; you are a winner
+MainWin:
+	return
+
+
+; ////////////////////////////////////////////////////////////////////////////
 
 MsgTim000:	.ascii	<2>"You need to set up VSYNC timer data"<12>
 		.ascii	"on BK0010. Use "<3>"arrow keys"<2>" to adjust"<12>
@@ -254,9 +227,94 @@ TKeysAdj:	.byte	C_KEY_LEFT, -4, C_KEY_RIGHT, 4, C_KEY_UP, -20, C_KEY_DOWN, 20
 TSlider1:	.byte	^B10100000, ^B00000000
 TSlider2:	.byte	^B00001010, ^B10101010
 
+
 ; //////////////////////////////////////////////////////////////////////////////
 ; // Logic
 ; //////////////////////////////////////////////////////////////////////////////
+
+; prepare vaddrs etc of objects
+ObjectsPrepare:
+	mov	#Object, R0
+	call	ObjPrepare
+	mov	#ObjectEnd, R0
+	call	ObjPrepare
+	mov	#ObjectEnd+ObjectEnd-Object, R0
+	call	ObjPrepare
+	return
+
+
+; restore background under objects
+ObjectsRestore:
+	mov	#ObjectEnd+ObjectEnd-Object, R0
+	call	ObjRestore
+	mov	#ObjectEnd, R0
+	call	ObjRestore
+	mov	#Object, R0
+	call	ObjRestore
+	return
+
+
+; save background and draw current sprites
+ObjectsSprite:
+	mov	#Object, R0
+	call	ObjSprite
+	mov	#ObjectEnd, R0
+	call	ObjSprite
+	mov	#ObjectEnd+ObjectEnd-Object, R0
+	call	ObjSprite
+	return
+
+
+; level procedures 
+LevelProc:
+	; even frame - drawing
+	bitb	#1, bFrame
+	bne	100$
+	call	ObjectsRestore				; restore background (reversed)
+	; frame #4 - check tiles to update
+	cmpb	bFrame, #4
+	bne	20$
+10$:	cmp	UpdTileAddr, #UpdTileTable
+	beq	20$
+	sub	#2, UpdTileAddr
+	mov	@UpdTileAddr, R5
+	movb	(R5), R0
+	sub	#LevelC, R5
+	asl	R5
+	mov	Level2Vaddr(R5), R5
+	call	DrawTile
+	br	10$
+20$:	call	ObjectsSprite				; draw sprites
+	return
+100$:	; frame #1 - prepare states
+	cmpb	bFrame, #1
+	bne	110$
+	call	PStatePrepare
+	call	GStatePrepare
+110$:	; odd frame - process states
+	call	PStateProcess
+	call	PStateWaitOut
+	call	GStateProcess
+	call	GStateWaitOut
+	call	ObjectsPrepare
+	call	CheckTurn
+	call	CheckSpace
+	call	RemovedProcess
+	return
+
+
+; cycle frame numbers
+IncFrames:
+	incb	bFrame
+	cmpb	bFrame, #12.
+	blo	10$
+	clrb	bFrame
+10$:	incb	bFrame2
+	cmpb	bFrame2, #24.
+	blo	20$
+	clrb	bFrame2
+20$:	return
+
 
 ; set up conversion table level addr -> vaddr
 SetupLVaddr:
@@ -355,7 +413,7 @@ ObjectInit:
 	mov	C_OBJ_INITY(R1), C_OBJ_Y(R1)
 	mov	C_OBJ_INITLA(R1), C_OBJ_LEVADDR(R1)
 	mov	#C_STATE_WAIT, C_OBJ_STATE(R1)
-	mov	#C_SPR_PLEFT1, C_OBJ_SPRITE(R1)
+	mov	#C_SPR_PSPAWN1, C_OBJ_SPRITE(R1)
 	cmp	R1, #Object
 	beq	20$
 	mov	#C_SPR_GSPAWN1, C_OBJ_SPRITE(R1)
@@ -512,7 +570,8 @@ PStatePrepare:
 290$:	cmpb	(R5), #C_TILE_BOX
 	bne	299$
 	clrb	(R5)
-	mov	R5, UpdTileAddr
+	mov	R5, @UpdTileAddr
+	add	#2, UpdTileAddr
 299$:	return
 
 
@@ -522,7 +581,13 @@ PStateWaitOut:
 	bne	99$
 	cmp	Object+C_OBJ_STATE, #C_STATE_OUT
 	bne	99$
-
+	; player to respawn point
+	mov	#Object, R0
+	mov	C_OBJ_INITX(R0), C_OBJ_X(R0)
+	mov	C_OBJ_INITY(R0), C_OBJ_Y(R0)
+	mov	C_OBJ_INITLA(R0), C_OBJ_LEVADDR(R0)
+	mov	#C_STATE_WAIT, C_OBJ_STATE(R0)
+	mov	#C_SPR_PSPAWN1, C_OBJ_SPRITE(R0)
 99$:	return
 
 
@@ -611,7 +676,7 @@ GStateWaitOut:
 	mov	#ObjectEnd, R0
 	call	10$
 	add	#ObjectEnd-Object, R0
-10$:	mov	C_OBJ_STATE(R0), R2
+10$:	mov	C_OBJ_STATE(R0), R2			; also ok with no object
 	beq	99$
 	; wait -> stop
 	cmp	R2, #C_STATE_WAIT
@@ -646,7 +711,7 @@ PStateProcess:
 	br	PStateUp				; 03 up
 	br	PStateDown				; 04 down
 	br	PStateFall				; 05 fall
-	return						; 06 wait
+	br	PStateWait				; 06 wait
 	br	PStateOut				; 07 out
 
 PStateLeft:	movb	DxLeft(R4), R1			; where is ADDB?!
@@ -665,7 +730,11 @@ PStateDown:	movb	DYDown(R4), R1
 		br	PStateUpC
 PStateFall:	add	#2, C_OBJ_Y(R0)
 		return
-PStateOut:	movb	SprOut(R4), C_OBJ_SPRITE(R0)	; (!) use bFrame/2
+PStateWait:	cmpb	C_OBJ_SPRITE(R0), SprSpawn+5
+		beq	99$
+		movb	SprSpawn(R4), C_OBJ_SPRITE(R0)	; (!) used bFrame/2
+99$:		return
+PStateOut:	movb	SprOut(R4), C_OBJ_SPRITE(R0)	; (!) used bFrame/2
 		return
 
 
@@ -676,11 +745,11 @@ GStateProcess:
 	call	10$
 	add	#ObjectEnd-Object, R0
 10$:	tst	C_OBJ_X(R0)				; no object?
-	beq	20$
+	beq	99$
 	mov	C_OBJ_STATE(R0), R1
 	asl	R1
 	add	R1, PC
-20$:	br	GStateStop				; 00 stop - animate
+	br	GStateStop				; 00 stop - animate
 	br	GStateLeft				; 01 left
 	br	GStateRight				; 02 right
 	br	GStateUp				; 03 up
@@ -688,6 +757,7 @@ GStateProcess:
 	br	PStateFall				; 05 fall - use player's fall
 	br	GStateWait				; 06 wait - animate
 	br	GStateOut				; 07 out
+99$:	return
 
 GStateStop:	movb	GSprUpDown(R5), C_OBJ_SPRITE(R0)
 		return
@@ -814,14 +884,11 @@ RemovedProcess:
 	add	#ObjectEnd-Object, R0
 	cmp	R0, #ObjectsEnd
 	blo	30$
-	; restore tile then
+	; set tile to restore then
 	mov	2(R4), R5
-	movb	4(R4), (R5)
-	sub	#LevelC, R5
-	asl	R5
-	mov	Level2Vaddr(R5), R5
-	mov	4(R4), R0
-	call	DrawTile
+	movb	4(R4), (R5)				; restore tile in map
+	mov	R5, @UpdTileAddr			; put addr to table to draw tiles
+	add	#2, UpdTileAddr
 	dec	(R4)					; set timer to -1, empty saved
 	br	190$
 100$:	; if object is at stop - set to 'out' (kill it)
@@ -940,9 +1007,10 @@ DrawTile:
 
 ; prepare object values (vaddr, spr addr etc.)
 ; R0 - object addr
-ObjPrepare:
+ObjPrepare:	
 	; set vaddr
 	mov	(R0)+, R1				; X (0..63)
+	beq	99$
 	mov	(R0)+, R2				; Y (0..255)
 	swab	R2
 	clc
@@ -956,7 +1024,7 @@ ObjPrepare:
 	asl	R1
 	mov	SpritesAddr(R1), R1
 	mov	R1, (R0)+				; saddr
-	return
+99$:	return
 
 
 ; restore object's background
@@ -1012,6 +1080,9 @@ DrawLevel:
 
 ; draws instructions
 ShowInstr:
+	tstb	bInstrShown
+	bne	99$
+	incb	bInstrShown
 	clr	bKeyCur					; (!) word commands here
 	mov	#InstrData, R0
 	mov	#C_VADDR, R1
@@ -1034,8 +1105,7 @@ ShowInstr:
 10$:	tst	bKeyCur
 	beq	.-4
 	clr	bKeyCur
-	call	FadeScreen
-	return
+99$:	return
 
 MsgInstr00:	.asciz	<2>"Instructions"
 MsgInstr01:	.asciz	<1>"arrows to "<2>"move"
@@ -1238,15 +1308,20 @@ Unpack:	clr	R2
 ; // Data
 ; //////////////////////////////////////////////////////////////////////////////
 
+bGameMode:	.byte	0
+bInstrShown:	.byte	0
+bLevel:		.byte	0
+bLives:		.byte	0
+Score:		.word	0
+
 TimerCycle:	.word	740				; counts for one screen
 TimerLine:	.word	360				; where we start main procedure
 
-bLevel:		.byte	0
-bLives:		.byte	0
 bFrame:		.byte	0
 bFrame2:	.byte	0
-UpdTileAddr:	.word	0				; level addr of a tile to update
-		.even
+
+UpdTileAddr:	.word	UpdTIleTable			; addr+2 in table for update tiles
+UpdTileTable:	.blkw	6				; max 6 tiles to update (isnt much?)
 
 	; ////////////////////////////////////////////
 	; RADIX 10 (!!!) RADIX 10 (!!!) RADIX 10 (!!!)
@@ -1265,6 +1340,7 @@ SprLeft:	.byte	03, 04, 05, 04, 03, 04, 05, 04, 03, 04, 05, 04
 SprRight:	.byte	00, 01, 02, 01, 00, 01, 02, 01, 00, 01, 02, 01
 SprUpDown:	.byte	07, 06, 07, 08, 07, 06, 07, 08, 07, 06, 07, 08
 SprOut:		.byte	16, 16, 17, 17, 18, 18 ; only 6 - for bFrame/2
+SprSpawn:	.byte	18, 17, 17, 16, 16, 05
 GSprRight:	.byte	10, 11, 12, 09, 10, 11, 12, 09, 10, 11, 12, 09
 GSprUpDown:	.byte	11, 11, 09, 09, 11, 11, 09, 09, 11, 11, 09, 09
 GSprWait:	.byte	13, 13, 14, 14, 15, 15 ; only 6 - for bFrame/2
@@ -1308,7 +1384,7 @@ ObjectEnd:	.blkb	ObjectEnd-Object*2		; 2 ghost objects
 ObjectsEnd:	
 
 ; removed (with space) tiles, [level addr], [timer to restore]
-Removed:	.blkw	5*3
+Removed:	.blkw	C_MAX_REMO*3
 RemovedEnd:	
 
 ; currently loaded level
@@ -1321,7 +1397,7 @@ LevelTable:	.word	Lev00
 	; 1-dirt, 2,3,4-stone, 5-ladder, 6-box, 7-chain, 8-door, 9-exit
 Lev00:
 @packstart10
-	.byte	16,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  8,  5, 16
+	.byte	16,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  8,  5,  0
 	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
 	.byte	 1,  1,  5,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  1,  1,  1,  5,  1
 	.byte	 0,  1,  5,  0,  0,  0,  5,  1,  1,  0,  0,  0,  1,  1,  5,  0,  0,  0,  5,  6
