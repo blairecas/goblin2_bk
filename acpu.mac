@@ -588,6 +588,7 @@ PStateWaitOut:
 	mov	C_OBJ_INITLA(R0), C_OBJ_LEVADDR(R0)
 	mov	#C_STATE_WAIT, C_OBJ_STATE(R0)
 	mov	#C_SPR_PSPAWN1, C_OBJ_SPRITE(R0)
+	clr	bKeyCur					; (!) word command
 99$:	return
 
 
@@ -1340,7 +1341,7 @@ SprLeft:	.byte	03, 04, 05, 04, 03, 04, 05, 04, 03, 04, 05, 04
 SprRight:	.byte	00, 01, 02, 01, 00, 01, 02, 01, 00, 01, 02, 01
 SprUpDown:	.byte	07, 06, 07, 08, 07, 06, 07, 08, 07, 06, 07, 08
 SprOut:		.byte	16, 16, 17, 17, 18, 18 ; only 6 - for bFrame/2
-SprSpawn:	.byte	18, 17, 17, 16, 16, 05
+SprSpawn:	.byte	18, 17, 17, 16, 16, 04
 GSprRight:	.byte	10, 11, 12, 09, 10, 11, 12, 09, 10, 11, 12, 09
 GSprUpDown:	.byte	11, 11, 09, 09, 11, 11, 09, 09, 11, 11, 09, 09
 GSprWait:	.byte	13, 13, 14, 14, 15, 15 ; only 6 - for bFrame/2
