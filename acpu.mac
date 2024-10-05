@@ -1,0 +1,1356 @@
+	.title	CPU
+	.enabl	LC, AMA
+
+	.asect
+	.=1000
+
+@include common.mac
+
+Start:	mtps	#200
+	mov	#1000, SP
+	mov	SP, @#4
+	clr	@#100					; use this as flag for BK 0010
+	; check for BK 0011(M)
+	cmpb	@#177717, #300
+	bne	10$
+	mov	#C_RAM_BANKS57, @#177716		; banks 5 7
+	clrb	@#177663				; vsync on, screen buf 5, palette 0
+	mov	#VsyInt, @#100
+	mov	#200, @#102
+	mov	#1200, TimerCycle
+	mov	#100, TimerLine
+	clr	R0
+	clr	R1
+	call	MusicInit
+10$:	; clear ram
+	mov	#End, R0
+	mov	#100000-End/2, R3
+	clr	(R0)+
+	sob	R3, .-2
+	mov	#1330, @#177664				; scroll screen to 0-line
+	; keyboadr interrupts
+	mov	#KbdInt, @#60
+	clr	@#62
+	mov	#Kbd274, @#274
+	clr	@#276
+	bic	#^B01000000, @#177660			; allow keyboard interrupt
+	; set timer to screen refresh length
+	mov	TimerCycle, @#177706
+	mov	#20, @#177712				; start timer, max speed
+	; all is set then
+	mtps	#0
+
+	; wait a bit, then finish init (TODO: check for vsync really working?)
+	clr	R0
+	sob	R0, .
+	tst	@#177662				; read keyboard reg just in case
+	clr	bKeyCur					; (!) also clears bKeySpace
+
+	call	SetupTimer				; start drawing timer ajust for BK 0010
+	call	SetupLVaddr				; level addrs -> vaddr table
+	call	ShowInstr
+
+	; level prepare
+	call	LoadLevel
+	call	RemovedInit
+	call	DrawBorder
+	call	DrawLevel
+	call	ObjectsPrepare
+	clr	bFrame					; (!) also clears bFrame2
+	clr	bKeyCur					; (!) also clears bKeySpace
+	clr	UpdTileAddr
+
+
+
+MainGame:
+	; wait for timer
+	mov	#177710, R0
+	cmp	TimerLine, (R0)
+	bne	.-4
+	; level proc
+	call	MainLevel
+	; music
+	call	MusicPlay
+	; DEBUG: output frame cycles
+	cmpb	bFrame, #4.
+	bhis	30$
+	mov	@#177710, R0
+	movb	bFrame, R5
+	asl	R5
+	asl	R5
+	asl	R5
+	add	#C_VADDR, R5
+	call	PrintOctal
+30$:	; DEBUG: end
+	call	IncFrames
+	br	MainGame
+
+ObjectsPrepare:
+	mov	#Object, R0
+	call	ObjPrepare
+	mov	#ObjectEnd, R0
+	call	ObjPrepare
+	mov	#ObjectEnd+ObjectEnd-Object, R0
+	call	ObjPrepare
+	return
+
+ObjectsRestore:
+	mov	#ObjectEnd+ObjectEnd-Object, R0
+	call	ObjRestore
+	mov	#ObjectEnd, R0
+	call	ObjRestore
+	mov	#Object, R0
+	call	ObjRestore
+	return
+
+ObjectsSprite:
+	mov	#Object, R0
+	call	ObjSprite
+	mov	#ObjectEnd, R0
+	call	ObjSprite
+	mov	#ObjectEnd+ObjectEnd-Object, R0
+	call	ObjSprite
+	return
+
+MainLevel:
+	; even frame - drawing
+	bitb	#1, bFrame
+	bne	100$
+	call	ObjectsRestore				; restore background (reversed)
+	; frame #4 - check tile to update (taking box)
+	cmpb	bFrame, #4
+	bne	10$
+	mov	UpdTileAddr, R5
+	beq	10$
+	clr	UpdTileAddr
+	movb	(R5), R0
+	sub	#LevelC, R5
+	asl	R5
+	mov	Level2Vaddr(R5), R5
+	call	DrawTile
+10$:	call	ObjectsSprite				; draw sprites
+	return
+
+100$:	; frame #1 - prepare states
+	cmpb	bFrame, #1
+	bne	110$
+	call	PStatePrepare
+	call	GStatePrepare
+
+110$:	; odd frame - process states
+	call	PStateProcess
+	call	PStateWaitOut
+	call	GStateProcess
+	call	GStateWaitOut
+	call	ObjectsPrepare
+	call	CheckTurn
+	call	CheckSpace
+	call	RemovedProcess
+	return
+
+
+IncFrames:
+	incb	bFrame
+	cmpb	bFrame, #12.
+	blo	10$
+	clrb	bFrame
+10$:	incb	bFrame2
+	cmpb	bFrame2, #24.
+	blo	20$
+	clrb	bFrame2
+20$:	return
+
+
+MsgTim000:	.ascii	<2>"You need to set up VSYNC timer data"<12>
+		.ascii	"on BK0010. Use "<3>"arrow keys"<2>" to adjust"<12>
+		.ascii	"slider.  Press "<3>"enter"<2>" when all THREE"<12>
+		.ascii	"sprites will be fully visible."<0>
+
+SetupTimer:
+	tst	@#100					; this set up is
+	bne	199$					; not needed on BK0011(M)
+	; message
+	mov	#MsgTim000, R0
+	mov	#24.*C_SCRWID+5+C_VADDR, R5
+	call	PrintStr
+	; draw gauge
+	mov	#128.*C_SCRWID+1+C_VADDR, R0
+	mov	#31., R3
+2$:	movb	#^B01000000, (R0)+
+	movb	#^B00000001, (R0)+
+	sob	R3, 2$
+	; prepare three objects
+	mov	#360, TimerLine
+	mov	#Object, R5
+	mov	#26., R4
+10$:	mov	R5, R0
+	mov	R4, C_OBJ_X(R0)
+	mov	#C_FIELD_ODY-1*C_TILE_DY-24., C_OBJ_Y(R0)
+	clr	C_OBJ_SPRITE(R0)
+	call	ObjPrepare
+	add	#4., R4
+	add	#ObjectEnd-Object, R5
+	cmp	R5, #ObjectsEnd
+	blo	10$
+	call	200$
+100$:	; adjust proc cycle
+	mov	#177710, R0
+	cmp	TimerLine, (R0)
+	bne	.-4
+	call	ObjectsSprite
+	call	ObjectsRestore
+	mov	@#177710, R5
+	; keys
+	mov	#TKeysAdj, R4
+	mov	#4, R3
+110$:	cmpb	bKeyCur, (R4)+
+	bne	120$
+	clrb	bKeyCur
+	movb	(R4), R0
+	add	R0, TimerLine
+	call	200$
+	br	100$
+120$:	inc	R4
+	sob	R3, 110$
+	cmpb	bKeyCur, #C_KEY_ENTER
+	bne	100$
+	mov	R5, TimerLine
+	call	FadeScreen
+199$:	return
+200$:	; correct value and draw it
+	mov	TimerLine, R0
+	cmp	R0, #4
+	bge	210$
+	mov	#4, R0
+210$:	cmp	R0, #734
+	ble	220$
+	mov	#734, R0
+220$:	mov	R0, TimerLine
+	mov	#108.*C_SCRWID+29.+C_VADDR, R5
+	call	PrintOctal
+	; draw line
+	mov	TimerLine, R0
+	mov	#^B0000101010100000, R1
+	asr	R0
+	asr	R0
+	asr	R0
+	bcc	230$
+	mov	#^B1010101000000000, R1
+230$:	add	#118.*C_SCRWID-1+C_VADDR, R0
+	mov	#8., R3
+240$:	clrb	(R0)+
+	clrb	(R0)+
+	movb	R1, (R0)+
+	swab	R1
+	movb	R1, (R0)+
+	swab	R1
+	clrb	(R0)+
+	clrb	(R0)+
+	add	#C_SCRWID-6, R0
+	sob	R3, 240$
+	return
+
+TKeysAdj:	.byte	C_KEY_LEFT, -4, C_KEY_RIGHT, 4, C_KEY_UP, -20, C_KEY_DOWN, 20
+TSlider1:	.byte	^B10100000, ^B00000000
+TSlider2:	.byte	^B00001010, ^B10101010
+
+; //////////////////////////////////////////////////////////////////////////////
+; // Logic
+; //////////////////////////////////////////////////////////////////////////////
+
+; set up conversion table level addr -> vaddr
+SetupLVaddr:
+	mov	#Level2Vaddr, R0
+	mov	#8.-C_TILE_DY*C_SCRWID+2-C_TILE_DX+C_VADDR, R4	; start at (2,8.)
+	mov	#C_FIELD_DY, R2
+10$:	mov	#C_FIELD_DX, R1
+	mov	R4, R5
+	add	#C_TILE_DY*C_SCRWID, R4
+20$:	mov	R5, (R0)+
+	add	#C_TILE_DX, R5
+	sob	R1, 20$
+	sob	R2, 10$
+	return
+
+
+; load and prepare level
+LoadLevel:
+	; clear objects
+	mov	#Object, R0
+	mov	#ObjectsEnd-Object/2, R3
+	clr	(R0)+
+	sob	R3, .-2
+	; unpack level
+	movb	bLevel, R0
+	asl	R0
+	mov	LevelTable(R0), R0
+	mov	#LevelC, R1
+	call	Unpack
+	; adjust unpacked
+	mov	#C_FIELD_ODX*C_FIELD_ODY+LevelC, R0	; end+1 of unpacked source
+	mov	#C_FIELD_DX*C_FIELD_DY+LevelC-C_FIELD_DX-1, R1	; end+1 for unpacked dest
+	mov	#C_FIELD_ODY, R3
+10$:	mov	#C_FIELD_ODX, R2
+	movb	-(R0), -(R1)
+	sob	R2, .-2
+	dec	R1
+	dec	R1
+	sob	R3, 10$
+	; top/bottom borders
+	mov	#LevelC, R0
+	mov	#C_FIELD_DX, R3
+20$:	movb	#3, C_FIELD_DY-1*C_FIELD_DX(R0)	; set them to stone (3)
+	movb	#3, (R0)+
+	sob	R3, 20$
+	; left/right borders
+	mov	#LevelC+C_FIELD_DX, R0
+	mov	#C_FIELD_DY-2, R3
+30$:	movb	#3, C_FIELD_DX-1(R0)
+	movb	#3, (R0)
+	add	#C_FIELD_DX, R0
+	sob	R3, 30$
+	; locate player and ghosts, set their init coords
+	mov	#LevelC, R0
+	mov	#ObjectEnd, R2
+	mov	#8.-C_TILE_DY, R5			; R5 - Y
+40$:	mov	#2.-C_TILE_DX, R4			; R4 - X
+50$:	cmpb	(R0), #17.				; 17. - player
+	bne	60$
+	mov	#Object, R1
+	call	200$
+	br	68$
+60$:	cmpb	(R0), #16.				; 16. - ghost (not removing from map)
+	bne	70$
+	mov	R2, R1
+	call	200$	
+	add	#ObjectEnd-Object, R2
+68$:	clrb	(R0)					; remove object from level map
+70$:	inc	R0
+	add	#C_TILE_DX, R4				; next X
+	cmp	R4, #C_FIELD_DX*C_TILE_DX+2.-C_TILE_DX
+	blo	50$
+	add	#C_TILE_DY, R5				; next Y
+	cmp	R5, #C_FIELD_DY*C_TILE_DY+8.-C_TILE_DY
+	blo	40$
+	; init player/ghosts
+	call	ObjectsReinit
+	return
+200$:	; setup player or ghost initial coords
+	mov	R4, C_OBJ_INITX(R1)
+	mov	R5, C_OBJ_INITY(R1)
+	mov	R0, C_OBJ_INITLA(R1)
+	return
+
+
+; reinitialization of objects, copy init coords to working 
+ObjectsReinit:
+	mov	#Object, R1
+10$:	call	ObjectInit
+	add	#ObjectEnd-Object, R1
+	cmp	R1, #ObjectsEnd
+	blo	10$
+	return
+ObjectInit:	
+	mov	C_OBJ_INITX(R1), C_OBJ_X(R1)
+	mov	C_OBJ_INITY(R1), C_OBJ_Y(R1)
+	mov	C_OBJ_INITLA(R1), C_OBJ_LEVADDR(R1)
+	mov	#C_STATE_WAIT, C_OBJ_STATE(R1)
+	mov	#C_SPR_PLEFT1, C_OBJ_SPRITE(R1)
+	cmp	R1, #Object
+	beq	20$
+	mov	#C_SPR_GSPAWN1, C_OBJ_SPRITE(R1)
+20$:	mov	R1, R2
+	add	#C_OBJ_SAVED, R2
+	mov	#C_OBJ_LEVADDR-C_OBJ_SAVED/2, R3
+	clr	(R2)+
+	sob	R3, .-2
+	return
+
+
+; can go left if have movable on the left
+; do NOT modify anything except R5
+; returns: C=1 - we can't
+ChkSLeft:	movb	-1(R1), R5			; take left side tile
+		tstb	TMovable(R5)			; check for movable
+		beq	ChkSSetC
+		mov	#-1, R5
+ChkSClrC:	; now R5 - dvaddr for 'move to', ghosts can's move on ghost - check it
+		cmp	R0, #Object
+		beq	10$
+		add	R1, R5				; R5 - levaddr of 'move to' position
+		cmp	R5, ObjectEnd+C_OBJ_LEVADDR
+		beq	ChkSSetC
+		cmp	R5, ObjectEnd+ObjectEnd-Object+C_OBJ_LEVADDR
+		beq	ChkSSetC
+10$:		tst	(PC)+
+ChkSSetC:	sec
+		return
+
+; check going right
+ChkSRight:	movb	1(R1), R5
+		tstb	TMovable(R5)
+		beq	ChkSSetC
+		mov	#1, R5
+		br	ChkSClrC
+
+; can climb up if: 1-have moveable above, 2-we are on ladder
+ChkSUp:		movb	-C_FIELD_DX(R1), R5
+		tstb	TMovable(R5)
+		beq	ChkSSetC
+		cmpb	(R1), #C_TILE_LADDER
+		bne	ChkSSetC
+		mov	#-C_FIELD_DX, R5
+		br	ChkSClrC
+
+; check climbing down: have ladder below OR (on ladder and movable below)
+ChkSDown:	movb	C_FIELD_DX(R1), R5
+		cmpb	R5, #C_TILE_LADDER
+		bne	10$
+		mov	#C_FIELD_DX, R5
+		br	ChkSClrC
+10$:		tstb	TMovable(R5)
+		beq	ChkSSetC		
+		cmpb	(R1), #C_TILE_LADDER
+		bne	ChkSSetC
+		mov	#C_FIELD_DX, R5
+		br	ChkSClrC
+
+; check if can fall: 1-we aren't on ladder, 2-fallable below, 3-aren't waiting keypress
+ChkSFall:	cmpb	(R1), #C_TILE_LADDER
+		beq	ChkSSetC
+		movb	C_FIELD_DX(R1), R5
+		tstb	TFallable(R5)
+		beq	ChkSSetC
+		cmp	R2, #C_STATE_WAIT
+		beq	ChkSSetC
+		mov	#C_FIELD_DX, R5
+		br	ChkSClrC
+
+; check if can stop - always can (even in mid-fall)
+ChkSStop:	clc
+		return
+
+
+; prepare player state
+PStatePrepare:
+	mov	#Object, R0
+	mov	C_OBJ_LEVADDR(R0), R1
+	mov	C_OBJ_STATE(R0), R2
+	; do nothing at out state
+	cmp	R2, #C_STATE_OUT
+	beq	09$
+	; awaiting keypress?
+	cmp	R2, #C_STATE_WAIT
+	bne	20$
+	tstb	bKeyCur
+	bne	10$
+09$:	return
+10$:	mov	#C_STATE_STOP, R2
+	mov	R2, C_OBJ_STATE(R0)			; set state immediately, to be sure
+20$:	; check if can fall (and nothing else maaatttteeers (c))
+	call	ChkSFall
+	bcc	30$
+	; chain below - special, fall if 1) key down 2) already falling AND no key up
+	cmpb	C_FIELD_DX(R1), #C_TILE_CHAIN
+	bne	40$
+	cmpb	bKeyCur, #C_KEY_DOWN
+	beq	30$
+	cmp	R2, #C_STATE_FALL
+	bne	40$
+	cmpb	bKeyCur, #C_KEY_UP
+	beq	40$
+30$:	; check for a ghost below (can't fall on ghost)
+	mov	R1, R5
+	add	#C_FIELD_DX, R5
+	cmp	R5, ObjectEnd+C_OBJ_LEVADDR
+	beq	40$
+	cmp	R5, ObjectEnd+ObjectEnd-Object+C_OBJ_LEVADDR
+	beq	40$
+	; falling immediately
+	mov	#C_STATE_FALL, C_OBJ_STATE(R0)
+	add	#C_FIELD_DX, C_OBJ_LEVADDR(R0)
+	mov	C_OBJ_LEVADDR(R0), R5			; don't forget to check eating box
+	br	290$
+40$:	; check keys
+	movb	bKeyCur, R3
+	mov	#KeysActions, R4
+50$:	cmp	R3, (R4)				; is it our key?
+	bne	60$
+	call	@TStateAvail-KeysActions(R4)		; check for direction avail
+	bcs	100$
+	sub	#KeysActions, R4
+	asr	R4
+	mov	R4, R2					; proposed state change
+	br	100$
+60$:	tst	(R4)+
+	cmp	R4, #TStateAvail
+	blo	50$
+100$:	; proposed or previous state must be in R2 now, check it
+	mov	R2, R5
+	asl	R5
+	call	@TStateAvail(R5)
+	bcc	200$
+	; if stop from climbing down - change sprite
+	cmp	R2, #C_STATE_DOWN
+	bne	110$
+	mov	#C_SPR_PLEFT1, C_OBJ_SPRITE(R0)
+	br	190$
+110$:	; if stop from climbing up AND not on ladder - change sprite
+	cmp	R2, #C_STATE_UP
+	bne	190$
+	cmpb	(R1), #C_TILE_LADDER
+	beq	190$
+	mov	#C_SPR_PLEFT1, C_OBJ_SPRITE(R0)
+190$:	mov	#C_STATE_STOP, R2
+	clrb	bKeyCur					; also clears key after stop	
+200$:	; adjust level addr and state
+	movb	DStateLevaddr(R2), R5			; direction delta
+	add	R1, R5					; add current level addr
+	mov	R5, C_OBJ_LEVADDR(R0)
+	mov	R2, C_OBJ_STATE(R0)
+	; check for eating box
+290$:	cmpb	(R5), #C_TILE_BOX
+	bne	299$
+	clrb	(R5)
+	mov	R5, UpdTileAddr
+299$:	return
+
+
+; process out for player (live lost)
+PStateWaitOut:
+	cmpb	bFrame, #11.
+	bne	99$
+	cmp	Object+C_OBJ_STATE, #C_STATE_OUT
+	bne	99$
+
+99$:	return
+
+
+; prepare ghost state
+GStatePrepare:
+	mov	#ObjectEnd, R0
+	call	10$
+	add	#ObjectEnd-Object, R0
+10$:	tst	C_OBJ_X(R0)				; is object present
+	beq	99$
+	mov	C_OBJ_LEVADDR(R0), R1
+	mov	C_OBJ_STATE(R0), R2
+	; check for sitting in a trap
+	cmpb	(R1), #C_TILE_REMO
+	bne	20$
+	cmp	R2, #C_STATE_OUT
+	beq	99$
+	mov	#C_STATE_STOP, C_OBJ_STATE(R0)
+	return
+20$:	; do nothing at wait or out states
+	cmp	R2, #C_STATE_WAIT
+	blo	100$
+99$:	return
+100$:	; first of all - check for a fall
+	call	ChkSFall
+	bcs	120$
+110$:	mov	#C_STATE_FALL, C_OBJ_STATE(R0)
+	add	#C_FIELD_DX, C_OBJ_LEVADDR(R0)
+	return
+120$:	; fall through chain
+	cmp	R2, #C_STATE_FALL
+	bne	300$
+	cmpb	C_FIELD_DX(R1), #C_TILE_CHAIN
+	beq	110$
+300$:	; try to move somewhere in direction of player
+	; put diff in coords
+	mov	Object+C_OBJ_X, R3
+	sub	C_OBJ_X(R0), R3
+	; asl	R3
+	; asl	R3					; make Y diff more preferable
+	mov	R3, C_STATE_RIGHT*2+GhostDiff
+	neg	R3
+	mov	R3, C_STATE_LEFT*2+GhostDiff
+	mov	Object+C_OBJ_Y, R3
+	sub	C_OBJ_Y(R0), R3
+	mov	R3, C_STATE_DOWN*2+GhostDiff
+	neg	R3
+	mov	R3, C_STATE_UP*2+GhostDiff
+	; put penalty for trying to move in opposite to current dir
+	movb	TStateOppo(R2), R5
+	asl	R5
+	sub	#400, GhostDiff(R5)
+	; select biggest diff then (with checks for avail)
+	mov	#-10000, R3
+	mov	#C_STATE_DOWN*2, R4
+	mov	#C_STATE_STOP, R2
+310$:	; check move avail
+	call	@TStateAvail(R4)
+	bcs	320$
+	; select bigger diff
+	cmp	GhostDiff(R4), R3
+	blt	320$
+	mov	R4, R2
+	asr	R2
+	mov	GhostDiff(R4), R3
+320$:	sub	#2, R4
+	bne	310$
+	; proposed or previous state must be in R2 now, check it again (just in case)
+	mov	R2, R5
+	asl	R5
+	call	@TStateAvail(R5)
+	bcc	400$
+	mov	#C_STATE_STOP, R2	
+400$:	; adjust level addr and state
+	movb	DStateLevaddr(R2), R5			; direction delta
+	add	R1, R5					; add current level addr
+	mov	R5, C_OBJ_LEVADDR(R0)
+	mov	R2, C_OBJ_STATE(R0)
+499$:	return
+
+
+; prepare in wait or out states at frame #11
+GStateWaitOut:
+	cmpb	bFrame, #11.
+	bne	99$
+	mov	#ObjectEnd, R0
+	call	10$
+	add	#ObjectEnd-Object, R0
+10$:	mov	C_OBJ_STATE(R0), R2
+	beq	99$
+	; wait -> stop
+	cmp	R2, #C_STATE_WAIT
+	bne	20$
+	mov	#C_STATE_STOP, R2
+	br	90$
+20$:	; out -> respawn (wait)
+	cmp	R2, #C_STATE_OUT
+	bne	99$
+	mov	#C_STATE_WAIT, R2
+	mov	C_OBJ_INITX(R0), C_OBJ_X(R0)
+	mov	C_OBJ_INITY(R0), C_OBJ_Y(R0)
+	mov	C_OBJ_INITLA(R0), C_OBJ_LEVADDR(R0)
+	clr	C_OBJ_SAVED(R0)
+90$:	mov	R2, C_OBJ_STATE(R0)
+99$:	return
+
+
+; process player states
+PStateProcess:
+	movb	bFrame, R4
+	asr	R4
+	movb	bFrame2, R5
+	asr	R5
+	mov	#Object, R0
+	mov	C_OBJ_STATE(R0), R1
+	asl	R1
+	add	R1, PC
+	return						; 00 stop
+	br	PStateLeft				; 01 left
+	br	PStateRight				; 02 right
+	br	PStateUp				; 03 up
+	br	PStateDown				; 04 down
+	br	PStateFall				; 05 fall
+	return						; 06 wait
+	br	PStateOut				; 07 out
+
+PStateLeft:	movb	DxLeft(R4), R1			; where is ADDB?!
+		add	R1, C_OBJ_X(R0)			; increase X
+		movb	SprLeft(R5), C_OBJ_SPRITE(R0)	; roll sprite
+		return
+PStateRight:	movb	DXRight(R4), R1
+		add	R1, C_OBJ_X(R0)
+		movb	SprRight(R5), C_OBJ_SPRITE(R0)
+		return
+PStateUp:	movb	DYUp(R4), R1
+PStateUpC:	add	R1, C_OBJ_Y(R0)	
+		movb	SprUpDown(R5), C_OBJ_SPRITE(R0)
+		return
+PStateDown:	movb	DYDown(R4), R1
+		br	PStateUpC
+PStateFall:	add	#2, C_OBJ_Y(R0)
+		return
+PStateOut:	movb	SprOut(R4), C_OBJ_SPRITE(R0)	; (!) use bFrame/2
+		return
+
+
+; process ghost states
+GStateProcess:
+	; (!) R4, R5 must be already set to bFrame/2 and bFrame2/2
+	mov	#ObjectEnd, R0
+	call	10$
+	add	#ObjectEnd-Object, R0
+10$:	tst	C_OBJ_X(R0)				; no object?
+	beq	20$
+	mov	C_OBJ_STATE(R0), R1
+	asl	R1
+	add	R1, PC
+20$:	br	GStateStop				; 00 stop - animate
+	br	GStateLeft				; 01 left
+	br	GStateRight				; 02 right
+	br	GStateUp				; 03 up
+	br	GStateDown				; 04 down
+	br	PStateFall				; 05 fall - use player's fall
+	br	GStateWait				; 06 wait - animate
+	br	GStateOut				; 07 out
+
+GStateStop:	movb	GSprUpDown(R5), C_OBJ_SPRITE(R0)
+		return
+GStateLeft:	movb	GDxLeft(R4), R1
+		add	R1, C_OBJ_X(R0)
+		movb	GSprRight(R5), C_OBJ_SPRITE(R0)
+		return
+GStateRight:	movb	DXRight(R4), R1
+		add	R1, C_OBJ_X(R0)
+		movb	GSprRight(R5), C_OBJ_SPRITE(R0)
+		return
+GStateUp:	sub	#2, C_OBJ_Y(R0)	
+		movb	GSprUpDown(R5), C_OBJ_SPRITE(R0)
+		return
+GStateDown:	add	#2, C_OBJ_Y(R0)	
+		movb	GSprUpDown(R5), C_OBJ_SPRITE(R0)
+		return
+GStateWait:	movb	GSprWait(R4), C_OBJ_SPRITE(R0)	; (!) use bFrame/2
+		return
+GStateOut:	movb	GSprOut(R4), C_OBJ_SPRITE(R0)	; (!) use bFrame/2
+		return
+
+
+; check for turnaround on frame #5
+CheckTurn:
+	cmpb	bFrame, #5
+	bne	99$
+	; run checks
+	mov	Object+C_OBJ_STATE, R2
+	mov	#TTurnTable, R5
+	mov	#4, R3
+10$:	movb	(R5)+, R1
+	movb	(R5)+, R4
+	cmpb	R2, (R5)+
+	bne	20$
+	cmpb	bKeyCur, (R5)
+	bne	20$
+	movb	1(R5), R2
+	br	90$
+20$:	inc	R5
+	inc	R5
+	sob	R3, 10$
+	return
+90$:	; apply new state, need to update level addr (!)
+	mov	R2, Object+C_OBJ_STATE
+	add	R4, Object+C_OBJ_LEVADDR
+	add	R1, Object+C_OBJ_X	
+99$:	return
+
+TTurnTable:	
+	; x adj, levaddr adj, state now, key, new state
+	.byte	+1, -1, C_STATE_RIGHT, C_KEY_LEFT, C_STATE_LEFT
+	.byte	-1, +1, C_STATE_LEFT, C_KEY_RIGHT, C_STATE_RIGHT
+	.byte	0, -C_FIELD_DX, C_STATE_DOWN, C_KEY_UP, C_STATE_UP
+	.byte	0, +C_FIELD_DX, C_STATE_UP, C_KEY_DOWN, C_STATE_DOWN
+
+
+; check space keypress and destroy small stone blocks if needed
+CheckSpace:
+	tstb	bKeySpace
+	beq	99$
+	clrb	bKeySpace
+	mov	Object+C_OBJ_LEVADDR, R1
+	mov	Object+C_OBJ_STATE, R2
+	movb	DStateLevaddr(R2), R5
+	sub	R5, R1					; 'rewind' level addr to previous
+	add	#C_FIELD_DX, R1				; take block 'below'
+	movb	(R1), R5
+	tstb	TDestroyable(R5)
+	beq	99$
+	; check for empty slot in 'removed' table
+	mov	#Removed, R0
+	mov	#RemovedEnd-Removed/6, R3
+10$:	tst	(R0)					; timer < 0 - free space
+	bmi	90$
+	add	#6, R0
+	sob	R3, 10$
+	return
+90$:	; add to 'removed'
+	mov	#C_REMO_TIME, (R0)+			; put timer
+	mov	R1, (R0)+				; put level addr
+	movb	(R1), R3
+	mov	R3, (R0)+				; put tile #
+	; remove tile
+	movb	#C_TILE_REMO, (R1)
+	sub	#LevelC, R1
+	asl	R1
+	mov	Level2Vaddr(R1), R5
+	clr	R0
+	call	DrawTile
+99$:	return
+
+
+; init 'removed' table with -1
+RemovedInit:
+	mov	#Removed, R0
+	mov	#RemovedEnd-Removed/2, R3
+10$:	mov	#-1, (R0)+
+	sob	R3, 10$
+	return
+
+
+; process removed tiles table
+RemovedProcess:
+	cmpb	bFrame, #11.				; work on last frame
+	bne	199$
+	mov	#Removed, R4
+10$:	tst	(R4)					; test timer
+	bmi	190$					; nothing here, continue
+	beq	20$					; already at zero, try to restore again
+	dec	(R4)					; decrease timer
+	bne	190$					; still have time
+20$:	; (R4) - timer, 2(R4) - level addr, 4(R4) - tile #
+	; do not restore if any object is moving in or moving out
+	mov	#Object, R0
+30$:	mov	C_OBJ_LEVADDR(R0), R1			; current levaddr
+	mov	C_OBJ_STATE(R0), R2
+	cmp	R1, 2(R4)				; moving in?
+	beq	100$
+	movb	DStateLevaddr(R2), R5
+	sub	R5, R1					; previous levaddr
+	cmp	R1, 2(R4)				; moved out?
+	beq	100$
+	add	#ObjectEnd-Object, R0
+	cmp	R0, #ObjectsEnd
+	blo	30$
+	; restore tile then
+	mov	2(R4), R5
+	movb	4(R4), (R5)
+	sub	#LevelC, R5
+	asl	R5
+	mov	Level2Vaddr(R5), R5
+	mov	4(R4), R0
+	call	DrawTile
+	dec	(R4)					; set timer to -1, empty saved
+	br	190$
+100$:	; if object is at stop - set to 'out' (kill it)
+	cmp	R2, #C_STATE_STOP
+	bne	190$
+	mov	#C_STATE_OUT, C_OBJ_STATE(R0)
+190$:	; continue cycle removed
+	add	#6, R4
+	cmp	R4, #RemovedEnd
+	blo	10$
+199$:	return
+
+
+; //////////////////////////////////////////////////////////////////////////////
+; // Music
+; //////////////////////////////////////////////////////////////////////////////
+
+MusicInit:
+	tst	@#100
+	bne	10$
+	return
+10$:	jmp	@#100000
+
+
+MusicPlay:
+	tst	@#100
+	bne	10$
+	return
+10$:	jmp	@#100004
+
+
+MusicMute:
+	tst	@#100
+	bne	10$
+	return
+10$:	jmp	@#100010
+
+
+; //////////////////////////////////////////////////////////////////////////////
+; // Drawing
+; //////////////////////////////////////////////////////////////////////////////
+
+; fade screen by randomly removing tiles
+FadeScreen:
+	mov	#C_SCRWID-4, R2
+	mov	#255., R4
+10$:	call	Random8bit				; R0 = (byte) [X][Y]
+	call	50$
+	sob	R4, 10$
+	clr	R0					; because we haven't 0 in random
+50$:	mov	R0, R1
+	bic	#^B1111111100001111, R1
+	asr	R1
+	asr	R1
+	bic	#^B1111111111110000, R0
+	swab	R0
+	asl	R0
+	asl	R0					; (!) must be *C_SCRWID*16.
+	add	R1, R0
+	add	#C_VADDR, R0
+	mov	#16., R3
+60$:	clr	(R0)+
+	clr	(R0)+
+	add	R2, R0
+	sob	R3, 60$
+	return
+
+
+; draw field border (8-pix around screen)
+DrawBorder:
+	; horizontal
+	mov	#C_VADDR+2, R4
+	mov	#224.*C_SCRWID+C_VADDR+2, R5
+	mov	#^B1100110011001100, R0
+	mov	#^B0011001100110011, R1
+	mov	#4., R3
+10$:	mov	#30., R2
+20$:	mov	R1, C_SCRWID(R4)
+	mov	R0, (R4)+
+	mov	R1, C_SCRWID(R5)
+	mov	R0, (R5)+
+	sob	R2, 20$
+	add	#C_SCRWID+4, R4
+	add	#C_SCRWID+4, R5
+	sob	R3, 10$
+	; vertical
+	mov	#C_VADDR, R4
+	mov	#C_VADDR+C_SCRWID-2, R5
+	mov	#116., R3
+	mov	#C_SCRWID*2, R2
+30$:	mov	R0, (R4)
+	mov	R1, C_SCRWID(R4)
+	mov	R0, (R5)
+	mov	R1, C_SCRWID(R5)
+	add	R2, R4
+	add	R2, R5
+	sob	R3, 30$
+	return
+
+
+; R0 - tile #, R5 - vaddr
+; not used: R3, R4
+DrawTile:
+	asl	R0
+	mov	TilesAddr(R0), R0
+	mov	#C_SCRWID-C_TILE_DX, R1
+	mov	#C_TILE_DY, R2
+10$:	movb	(R0)+, (R5)+
+	movb	(R0)+, (R5)+
+	movb	(R0)+, (R5)+
+	add	R1, R5
+	sob	R2, 10$
+	sub	#C_TILE_DY*C_SCRWID-C_TILE_DX, R5
+	return
+
+
+; prepare object values (vaddr, spr addr etc.)
+; R0 - object addr
+ObjPrepare:
+	; set vaddr
+	mov	(R0)+, R1				; X (0..63)
+	mov	(R0)+, R2				; Y (0..255)
+	swab	R2
+	clc
+	ror	R2
+	asr	R2
+	add	R2, R1
+	add	#C_VADDR, R1
+	mov	R1, (R0)+				; vaddr
+	; set sprite addr
+	mov	(R0)+, R1
+	asl	R1
+	mov	SpritesAddr(R1), R1
+	mov	R1, (R0)+				; saddr
+	return
+
+
+; restore object's background
+; R0 - object addr
+ObjRestore:
+	add	#C_OBJ_SAVED, R0
+	mov	(R0)+, R1				; R1 - saved vaddr
+	beq	99$					; not saved yet?
+	mov	#C_SCRWID-C_TILE_DX, R2
+	mov	#C_TILE_DY, R3
+10$:	movb	(R0)+, (R1)+
+	movb	(R0)+, (R1)+
+	movb	(R0)+, (R1)+
+	add	R2, R1
+	sob	R3, 10$
+99$:	return
+
+
+; draw object's sprite
+; R0 - object addr
+ObjSprite:
+	mov	C_OBJ_VADDR(R0), R4			; R4 - vaddr
+	beq	99$					; not initialized?
+	mov	C_OBJ_SADDR(R0), R1			; R1 - sprite addr
+	add	#C_OBJ_SAVED, R0			; R0 - saved addr
+	mov	R4, (R0)+				; save vaddr
+	mov	#C_SCRWID-3, R2
+	mov	#C_TILE_DY, R3
+10$:	.rept	3
+	movb	(R4), (R0)+				; save background
+	bicb	(R1)+, (R4)				; put mask
+	bisb	(R1)+, (R4)+				; put pixels
+	.endr
+	add	R2, R4
+	sob	R3, 10$
+99$:	return
+
+
+; draws currently loaded level
+DrawLevel:
+	mov	#8.*C_SCRWID+2+C_VADDR, R5
+	mov	#LevelC+C_FIELD_DX+1, R4
+20$:	mov	#C_FIELD_DX-2, R3
+30$:	movb	(R4)+, R0
+	call	DrawTile
+	sob	R3, 30$
+	add	#C_TILE_DY-1*C_SCRWID+4, R5
+	add	#2, R4
+	cmp	R4, #LevelCEnd-C_FIELD_DX-1
+	blo	20$
+	return
+
+
+; draws instructions
+ShowInstr:
+	clr	bKeyCur					; (!) word commands here
+	mov	#InstrData, R0
+	mov	#C_VADDR, R1
+	call	Unpack
+	mov	#MsgInstr00, R0
+	mov	#8.*C_SCRWID+23.+C_VADDR, R5
+	call	PrintStr
+	mov	#MsgInstr01, R0
+	mov	#76.*C_SCRWID+6.+C_VADDR, R5
+	call	PrintStr
+	mov	#MsgInstr02, R0
+	mov	#124.*C_SCRWID+39.+C_VADDR, R5
+	call	PrintStr
+	mov	#MsgInstr03, R0
+	mov	#172.*C_SCRWID+7.+C_VADDR, R5
+	call	PrintStr
+	mov	#MsgInstr04, R0
+	mov	#232.*C_SCRWID+36.+C_VADDR, R5
+	call	PrintStr
+10$:	tst	bKeyCur
+	beq	.-4
+	clr	bKeyCur
+	call	FadeScreen
+	return
+
+MsgInstr00:	.asciz	<2>"Instructions"
+MsgInstr01:	.asciz	<1>"arrows to "<2>"move"
+MsgInstr02:	.asciz	<2>"avoid"<1>" them"
+MsgInstr03:	.asciz	<2>"collect"<1>" gold"
+MsgInstr04:	.asciz	<2>"trap"<1>" with space"
+		.even
+
+; //////////////////////////////////////////////////////////////////////////////
+; // Utils
+; //////////////////////////////////////////////////////////////////////////////
+
+VsyInt:	mov	#20, @#177712
+	rti
+
+Kbd274:
+KbdInt:	mov	R0, -(SP)	
+	movb	@#177662, R0
+	cmpb	R0, #40
+	bne	90$
+	movb	R0, bKeySpace
+	br	99$
+90$:	movb	R0, bKeyCur
+99$:	mov	(SP)+, R0
+	rti
+
+bKeyCur:	.byte	0
+bKeySpace:	.byte	0
+
+
+; LFSR 8-bit random (Galois)
+Random8bit:
+20$:	asr	#123
+	bcc	30$
+	mov	#^B0000000010111000, R0
+	xor	R0, 20$+2
+30$:	mov	20$+2, R0
+	return
+
+
+; 4x5 numbers (aligned by 8 bytes)
+SprNumbers45:
+	.byte	^B00111111, ^B00110011, ^B00110011, ^B00110011, ^B00111111, 0, 0, 0
+	.byte	^B00001100, ^B00001100, ^B00001100, ^B00001100, ^B00001100, 0, 0, 0
+	.byte	^B00111111, ^B00110000, ^B00111111, ^B00000011, ^B00111111, 0, 0, 0
+	.byte	^B00111111, ^B00110000, ^B00111100, ^B00110000, ^B00111111, 0, 0, 0
+	.byte	^B00110011, ^B00110011, ^B00111111, ^B00110000, ^B00110000, 0, 0, 0
+	.byte	^B00111111, ^B00000011, ^B00111111, ^B00110000, ^B00111111, 0, 0, 0
+	.byte	^B00111111, ^B00000011, ^B00111111, ^B00110011, ^B00111111, 0, 0, 0
+	.byte	^B00111111, ^B00110000, ^B00110000, ^B00110000, ^B00110000, 0, 0, 0
+	.byte	^B00111111, ^B00110011, ^B00111111, ^B00110011, ^B00111111, 0, 0, 0
+	.byte	^B00111111, ^B00110011, ^B00111111, ^B00110000, ^B00111111, 0, 0, 0 
+
+; print octal word (4x5 font), R0 - word, R5 - vaddr
+PrintOctal:
+	mov	#C_SCRWID, R2
+	mov	#6., R3
+	; 1st bit
+	clr	R1
+	br	22$
+20$:	; get number
+	clr	R1
+	asl	R0
+	rol	R1
+	asl	R0
+	rol	R1
+22$:	asl	R0
+	rol	R1	
+	; get spr addr
+	asl	R1
+	asl	R1
+	asl	R1
+	add	#SprNumbers45, R1
+	; put bits
+	movb	(R1)+, (R5)
+	add	R2, R5
+	movb	(R1)+, (R5)
+	add	R2, R5
+	movb	(R1)+, (R5)
+	add	R2, R5
+	movb	(R1)+, (R5)
+	add	R2, R5
+	movb	(R1)+, (R5)
+	sub	#C_SCRWID*4-1, R5
+	sob	R3, 20$
+	return	 
+
+
+PriColorsTbl:
+	.word	^B1111111111111111, ^B1010101010101010, ^B0101010101010101, ^B0000000000000000
+
+PrintStrFir:
+	.rept	8.
+	movb	(R1)+, R4
+	bicb	R3, R4
+	movb	R4, (R5)+
+	movb	(R1)+, R4
+	bicb	R3, R4
+	movb	R4, (R5)
+	add	R2, R5
+	.endr
+	sub	#8.*C_SCRWID-1, R5
+	mov	PC, R4
+	return
+	.rept	8.
+	mov	(R1)+, R4
+	bic	R3, R4
+	asl	R4
+	asl	R4
+	asl	R4
+	asl	R4
+	bisb	R4, (R5)+
+	swab	R4
+	movb	R4, (R5)
+	add	R2, R5
+	.endr
+	sub	#8.*C_SCRWID-2, R5
+	mov	#PrintStrFir-2, R4
+	return
+
+; print string with 6x8 font, R0 - string, R5 - vaddr
+PrintStr:
+	mov	R5, -(SP)
+	mov	#C_SCRWID-1, R2
+	clr	R3			; font mask, default will be red
+	mov	#PrintStrFir, 40$+2	; first printing procedure always without shifting
+10$:	movb	(R0)+, R1
+	beq	99$
+	cmp	R1, #3.			; is it 'color' symbol
+	bhi	20$
+	asl	R1
+	mov	PriColorsTbl(R1), R3	; change font color mask
+	br	10$
+20$:	cmp	R1, #12			; is it 'newline'
+	bne	30$
+	add	#10.*C_SCRWID, (SP)
+	mov	(SP), R5
+	mov	#PrintStrFir, 40$+2
+	br	10$
+30$:	sub	#32., R1		; relative to 'space'
+	asl	R1			; *16 bytes (character font size)
+	asl	R1
+	asl	R1
+	asl	R1
+	add	#FontData, R1		; R1 = font data
+40$:	call	PrintStrFir
+	add	#2, R4
+	mov	R4, 40$+2
+	br	10$
+99$:	tst	(SP)+
+	return 
+
+
+
+; ZX0 v2.2 standart unpacker
+; original ZX0 encoder/decoder (c) Einar Saukas & Urusergi
+; PDP11 version by reddie, 02-may-2024 (upd)
+Unpack:	clr	R2
+	movb	#200, R3
+	sxt	R5
+10$:	call	50$
+	movb	(R0)+, (R1)+
+	sob	R2, .-2
+	aslb	R3
+	bcs	30$
+	call	50$
+20$:	mov	R1, R4
+	add	R5, R4
+	movb	(R4)+, (R1)+
+	sob	R2, .-2
+	aslb	R3
+	bcc	10$
+30$:	mov	#-2, R2
+	call	60$
+	incb	R2
+	bne	.+4
+40$:	return
+	swab	R2
+	mov	R2, R5
+	clrb	R5
+	bisb	(R0)+, R5
+	asr	R5
+	mov	#1, R2
+	bcs	.+6
+	call	80$
+	inc	R2
+	br	20$
+50$:	incb	R2
+60$:	aslb	R3
+	bne	70$
+	movb	(R0)+, R3
+	rolb	R3
+70$:	bcs	40$
+80$:	aslb	R3
+	rol	R2
+	br	60$
+
+
+; //////////////////////////////////////////////////////////////////////////////
+; // Data
+; //////////////////////////////////////////////////////////////////////////////
+
+TimerCycle:	.word	740				; counts for one screen
+TimerLine:	.word	360				; where we start main procedure
+
+bLevel:		.byte	0
+bLives:		.byte	0
+bFrame:		.byte	0
+bFrame2:	.byte	0
+UpdTileAddr:	.word	0				; level addr of a tile to update
+		.even
+
+	; ////////////////////////////////////////////
+	; RADIX 10 (!!!) RADIX 10 (!!!) RADIX 10 (!!!)
+	; ////////////////////////////////////////////	
+	.radix	10
+
+; XY additions for moving (used bFrame/2)
+DxLeft:		.byte	 0, -1,  0, -1,  0, -1
+DxRight:	.byte	 0,  1,  0,  1,  0,  1
+DyUp:		.byte	-2, -2, -2, -2, -2, -2
+DyDown:		.byte	 2,  2,  2,  2,  2,  2
+GDxLeft:	.byte	-1,  0, -1,  0, -1,  0
+
+; sprite # for moving (they are x2 in length, used bFrame2/2)
+SprLeft:	.byte	03, 04, 05, 04, 03, 04, 05, 04, 03, 04, 05, 04
+SprRight:	.byte	00, 01, 02, 01, 00, 01, 02, 01, 00, 01, 02, 01
+SprUpDown:	.byte	07, 06, 07, 08, 07, 06, 07, 08, 07, 06, 07, 08
+SprOut:		.byte	16, 16, 17, 17, 18, 18 ; only 6 - for bFrame/2
+GSprRight:	.byte	10, 11, 12, 09, 10, 11, 12, 09, 10, 11, 12, 09
+GSprUpDown:	.byte	11, 11, 09, 09, 11, 11, 09, 09, 11, 11, 09, 09
+GSprWait:	.byte	13, 13, 14, 14, 15, 15 ; only 6 - for bFrame/2
+GSprOut:	.byte	15, 15, 14, 14, 13, 13
+
+; tiles for moving into (1 - yes)
+TMovable:	.byte	1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1
+; tiles for falling through
+TFallable:	.byte	1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1
+; tiles that can be temporarily destroyed by pressing space
+TDestroyable:	.byte	0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+
+; states to level addr moving (stop, left, right, up, down, fall, wait, out)
+DStateLevaddr:	.byte	0, -1, 1, -C_FIELD_DX, C_FIELD_DX, C_FIELD_DX, 0, 0
+
+; proposed states for keys and check avail
+KeysActions:	.word	C_KEY_ENTER,  C_KEY_LEFT,   C_KEY_RIGHT,   C_KEY_UP,   C_KEY_DOWN,   C_KEY_DOWN,   -1,           -1
+TStateAvail:	.word	ChkSStop,     ChkSLeft,     ChkSRight,     ChkSUp,     ChkSDown,     ChkSFall,     ChkSSetC,     ChkSSetC
+
+; differences in coords 
+GhostDiff:	.word	0, 0, 0, 0, 0, 0, 0, 0
+; opposite state in moving dir
+TStateOppo:	.byte	C_STATE_STOP, C_STATE_RIGHT, C_STATE_LEFT, C_STATE_DOWN, C_STATE_UP, C_STATE_FALL, C_STATE_WAIT, C_STATE_OUT
+
+
+; first is player, then ghosts, X=0 - no object
+Object:		.word	0				; 000 X
+		.word	0				; 002 Y
+		.word	0				; 004 vaddr
+		.word	0				; 006 sprite #
+		.word	0				; 010 sprite addr
+		.word	0				; 012 saved background vaddr
+		.blkb	C_TILE_SIZE			; 014 saved background data
+		.word	0				; addr in level
+		.word	0				; state
+		.word	0				; init value of X
+		.word	0				; init value of Y
+		.word	0				; init value of level addr
+		.word	0				; ladders count around
+ObjectEnd:	.blkb	ObjectEnd-Object*2		; 2 ghost objects
+ObjectsEnd:	
+
+; removed (with space) tiles, [level addr], [timer to restore]
+Removed:	.blkw	5*3
+RemovedEnd:	
+
+; currently loaded level
+LevelC:		.blkb	C_FIELD_DY*C_FIELD_DX
+LevelCEnd:
+
+; table of packed level addrs
+LevelTable:	.word	Lev00
+
+	; 1-dirt, 2,3,4-stone, 5-ladder, 6-box, 7-chain, 8-door, 9-exit
+Lev00:
+@packstart10
+	.byte	16,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  8,  5, 16
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
+	.byte	 1,  1,  5,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  1,  1,  1,  5,  1
+	.byte	 0,  1,  5,  0,  0,  0,  5,  1,  1,  0,  0,  0,  1,  1,  5,  0,  0,  0,  5,  6
+	.byte	 6,  1,  5,  0,  0,  0,  5,  1,  1,  6,  6,  6,  1,  1,  5,  0,  0,  0,  5,  0
+	.byte	 1,  1,  5,  0,  0,  0,  5,  1,  1,  1,  1,  1,  1,  1,  5,  1,  1,  1,  5,  1
+	.byte	 0,  0,  5,  0,  0,  6,  5,  0,  0,  5,  0,  0,  0,  0,  5,  6,  0,  6,  5,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  6,  0,  5,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  5,  0,  6,  0,  0,  5,  6,  0,  6,  5,  0
+	.byte	 5,  1,  1,  7,  7,  7,  5,  2,  4,  5,  2,  3,  3,  4,  5,  0,  0,  0,  5,  0
+	.byte	 5,  0,  0,  0,  0,  0,  5,  0,  0,  5,  0, 17,  0,  0,  5,  7,  7,  7,  5,  0
+	.byte	 5,  0,  0,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  5,  0
+	.byte	 2,  4,  5,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  5,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  2,  3,  3,  3,  3,  3,  3,  3,  3,  3,  4,  5,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  0
+	.byte	 6,  6,  5,  2,  3,  3,  3,  4,  6,  6,  0,  0,  0,  0,  0,  0,  0,  0,  5,  1
+@packend
+	.even
+
+	; //////////////////////////////////////////////////////////////////////
+	; // RADIX 8 (!!!)
+	; //////////////////////////////////////////////////////////////////////
+	.radix	8
+
+@include inc_graphics.mac
+	.even
+
+Level2Vaddr:	.blkw	C_FIELD_DX*C_FIELD_DY
+
+End:	.word	0
+	.end Start
