@@ -6,11 +6,11 @@
     fclose($f);
     if ($src === false) { echo "ERROR: file $fname read failed\n"; exit(1); }
 
-    $replarr = Array(' ' => 0, '!' => 5, '&' => 16, '(' => 8, '"' => 1, '#' => 3, '%' => 17, '$' => 6, '\'' => 7);
+    $replarr = Array(' ' => 0, '!' => 5, '&' => 28, '(' => 8, '"' => 1, '#' => 3, '%' => 29, '$' => 6, '\'' => 7);
 
     // output file
     $g = fopen(pathinfo(__FILE__, PATHINFO_DIRNAME)."/maps.mac", "w");
-    for ($map=0; $map<12; $map++)
+    for ($map=2; $map<12; $map++)
     {
         $addr = 0x1FE6 + ($map*26*15);
         // fputs($g, "Lev$map:\n@packstart10\n");
@@ -37,6 +37,7 @@
                 if ($x<25) fputs($g, ", "); else fputs($g, "\n");
             }
         }
+	fputs($g, "\n");
         //fputs($g, "@packend\n\n");
     }
     fclose($g);

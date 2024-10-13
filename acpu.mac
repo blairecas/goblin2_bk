@@ -69,9 +69,9 @@ MainInit:
 	mov	#MenuData, R0
 	mov	#C_VADDR, R1
 	call	Unpack
-	mov	#MsgLevel, R0
-	mov	#C_MENU_Y-016.*C_SCRWID+C_MENU_X+C_VADDR, R5
-	call	PrintStr
+	mov	#MsgSelLev, R0
+	mov	#C_MENU_Y-016.*C_SCRWID+C_MENU_X-2+C_VADDR, R5
+	call	PrintStr2
 	call	MenuLevel
 	mov	#MsgMenu001, R0
 	mov	#C_MENU_Y+000.*C_SCRWID+C_MENU_X+C_VADDR, R5
@@ -97,30 +97,40 @@ MainInit:
 
 ; menu
 MainMenu:
+	; wait for timer
+	mov	#177710, R0
+	cmp	TimerLine, (R0)
+	bne	.-4
+	; 1
 	cmpb	bKeyCur, #C_KEY_1
 	bne	10$
 	jmp	JoySetup
-10$:	cmpb	bKeyCur, #C_KEY_2
+10$:	; 2
+	cmpb	bKeyCur, #C_KEY_2
 	bne	20$
 	comb	bUseMusic
 	call	MenuMusicOnOff
 	clr	bKeyCur					; (!) word command
 	return
-20$:	cmpb	bKeyCur, #C_KEY_3
+20$:	; 3
+	cmpb	bKeyCur, #C_KEY_3
 	bne	30$
 	call	ShowInstrA
 	clrb	bGameMode
 	return
-30$:	cmpb	bKeyCur, #C_KEY_0
+30$:	; 0
+	cmpb	bKeyCur, #C_KEY_0
 	bne	40$
 	mov	@#177716, R0
 	clrb	R0
 	jmp	(R0)
-40$:	cmpb	bKeySpace, #C_KEY_SPACE
+40$:	; =
+	cmpb	bKeySpace, #C_KEY_SPACE
 	bne	50$
 	movb	#C_MODE_PRELEV, bGameMode
 	return
-50$:	cmpb	bKeyCur, #C_KEY_LEFT
+50$:	; <-
+	cmpb	bKeyCur, #C_KEY_LEFT
 	bne	60$
 	clr	bKeyCur
 	movb	bLevel, R0
@@ -130,7 +140,8 @@ MainMenu:
 	clr	R0
 52$:	movb	R0, bLevel
 	br	MenuLevel
-60$:	cmpb	bKeyCur, #C_KEY_RIGHT
+60$:	; ->
+	cmpb	bKeyCur, #C_KEY_RIGHT
 	bne	99$
 	clr	bKeyCur
 	movb	bLevel, R0
@@ -151,8 +162,8 @@ MenuLevel:
 	call	PrintStr2
 	movb	bLevel, R0
 	add	#'A, R0
-	movb	R0, MsgLevelA+1
-	mov	#MsgLevelA, R0
+	movb	R0, MsgSelLevA+1
+	mov	#MsgSelLevA, R0
 	mov	#C_MENU_Y-016.*C_SCRWID+C_MENU_X+19.+C_VADDR, R5
 	call	PrintStr2
 	return
@@ -185,7 +196,6 @@ MainPreLev:
 	call	FadeScreen
 	call	LoadLevel
 	call	RemovedInit
-	call	DrawBorder
 	call	DrawLevel
 	call	ObjectsPrepare
 	clr	bFrame					; (!) also clears bFrame2
@@ -417,7 +427,7 @@ IncFrames:
 ; set up conversion table level addr -> vaddr
 SetupLVaddr:
 	mov	#Level2Vaddr, R0
-	mov	#8.-C_TILE_DY*C_SCRWID+2-C_TILE_DX+C_VADDR, R4	; start at (2,8.)
+	mov	#8.-C_TILE_DY*C_SCRWID+2-C_TILE_DX+C_VADDR, R4	; start at (2,8.) without bounding box
 	mov	#C_FIELD_DY, R2
 10$:	mov	#C_FIELD_DX, R1
 	mov	R4, R5
@@ -455,16 +465,21 @@ LoadLevel:
 	; top/bottom borders
 	mov	#LevelC, R0
 	mov	#C_FIELD_DX, R3
-20$:	movb	#3, C_FIELD_DY-1*C_FIELD_DX(R0)	; set them to stone (3)
-	movb	#3, (R0)+
+20$:	movb	#C_TILE_BDOWN, C_FIELD_DY-1*C_FIELD_DX(R0)
+	movb	#C_TILE_BUP, (R0)+
 	sob	R3, 20$
 	; left/right borders
 	mov	#LevelC+C_FIELD_DX, R0
 	mov	#C_FIELD_DY-2, R3
-30$:	movb	#3, C_FIELD_DX-1(R0)
-	movb	#3, (R0)
+30$:	movb	#C_TILE_BRIGHT, C_FIELD_DX-1(R0)
+	movb	#C_TILE_BLEFT, (R0)
 	add	#C_FIELD_DX, R0
 	sob	R3, 30$
+	; corners
+	movb	#C_TILE_BUPLE, LevelC
+	movb	#C_TILE_BUPRI, C_FIELD_DX-1+LevelC
+	movb	#C_TILE_BDOLE, C_FIELD_DY-1*C_FIELD_DX+LevelC
+	movb	#C_TILE_BDORI, C_FIELD_DY*C_FIELD_DX-1+LevelC
 	; locate player, gold, ghosts
 	clrb	bGoldLeft
 	clrb	bNextLevel
@@ -966,11 +981,11 @@ CheckSpace:
 	movb	(R1), R3
 	mov	R3, (R0)+				; put tile #
 	; remove tile
-	movb	#C_TILE_REMO, (R1)
+	movb	#C_TILE_REMO, R0
+	movb	R0, (R1)
 	sub	#LevelC, R1
 	asl	R1
 	mov	Level2Vaddr(R1), R5
-	clr	R0
 	call	DrawTile
 	clrb	bKeySpace
 99$:	return
@@ -1084,38 +1099,6 @@ FadeScreen:
 	return
 
 
-; draw field border (8-pix around screen)
-DrawBorder:
-	; horizontal
-	mov	#C_VADDR+2, R4
-	mov	#224.*C_SCRWID+C_VADDR+2, R5
-	mov	#^B1100110011001100, R0
-	mov	#^B0011001100110011, R1
-	mov	#4., R3
-10$:	mov	#30., R2
-20$:	mov	R1, C_SCRWID(R4)
-	mov	R0, (R4)+
-	mov	R1, C_SCRWID(R5)
-	mov	R0, (R5)+
-	sob	R2, 20$
-	add	#C_SCRWID+4, R4
-	add	#C_SCRWID+4, R5
-	sob	R3, 10$
-	; vertical
-	mov	#C_VADDR, R4
-	mov	#C_VADDR+C_SCRWID-2, R5
-	mov	#116., R3
-	mov	#C_SCRWID*2, R2
-30$:	mov	R0, (R4)
-	mov	R1, C_SCRWID(R4)
-	mov	R0, (R5)
-	mov	R1, C_SCRWID(R5)
-	add	R2, R4
-	add	R2, R5
-	sob	R3, 30$
-	return
-
-
 ; R0 - tile #, R5 - vaddr
 ; not used: R3, R4
 DrawTile:
@@ -1192,17 +1175,33 @@ ObjSprite:
 
 ; draws currently loaded level
 DrawLevel:
-	mov	#8.*C_SCRWID+2+C_VADDR, R5
-	mov	#LevelC+C_FIELD_DX+1, R4
-20$:	mov	#C_FIELD_DX-2, R3
-30$:	movb	(R4)+, R0
-	call	DrawTile
-	sob	R3, 30$
-	add	#C_TILE_DY-1*C_SCRWID+4, R5
-	add	#2, R4
-	cmp	R4, #LevelCEnd-C_FIELD_DX-1
-	blo	20$
-	return
+	mov	#255., R1
+10$:	call	Random8bit
+	mov	R0, -(SP)
+	call	50$
+	mov	(SP)+, R0
+	add	#256., R0
+	call	50$
+	sob	R1, 10$
+	clr	R0
+	call	50$
+	mov	#256., R0	
+50$:	cmp	R0, #C_FIELD_DY*C_FIELD_DX
+	bhis	90$	
+	movb	LevelC(R0), R4
+	beq	90$
+	asl	R0
+	mov	Level2Vaddr(R0), R5
+	asl	R4
+	mov	TilesAddr(R4), R4
+	; bis tile, R4-src, R5-dst
+	mov	#12., R3
+60$:	bisb	(R4)+, (R5)+
+	bisb	(R4)+, (R5)+
+	bisb	(R4)+, (R5)+
+	add	#C_SCRWID-3, R5
+	sob	R3, 60$
+90$:	return
 
 
 ; draws instructions
@@ -1256,6 +1255,8 @@ KbdInt:	mov	R0, -(SP)
 	cmpb	R0, #40
 	bne	90$
 	movb	R0, bKeySpace
+	tstb	bKeyCur
+	beq	90$
 	br	99$
 90$:	movb	R0, bKeyCur
 99$:	mov	(SP)+, R0
@@ -1265,11 +1266,20 @@ bKeyCur:	.byte	0
 bKeySpace:	.byte	0
 
 
-; LFSR 8-bit random (Galois)
+; LFSR 8-bit random (Galois), 2^8-1 cycle
 Random8bit:
 20$:	asr	#123
 	bcc	30$
 	mov	#^B0000000010111000, R0
+	xor	R0, 20$+2
+30$:	mov	20$+2, R0
+	return
+
+; LFSR 9-bit random (Galois), 2^9-1 cycle
+Random9bit:
+20$:	asr	#123
+	bcc	30$
+	mov	#^B0000000110110000, R0
 	xor	R0, 20$+2
 30$:	mov	20$+2, R0
 	return
@@ -1583,14 +1593,16 @@ UpdTileTable:	.blkw	6				; max 6 tiles to update (isnt much?)
 
 MsgOn:		.asciz	<2>"ON "
 MsgOff:		.asciz	<1>"OFF"
-MsgMenu001:	.asciz	<2>"1 "<1>"JOYSTICK"
-MsgMenu002:	.asciz	<2>"2 "<1>"MUSIC"
-MsgMenu003:	.asciz	<2>"3 "<1>"INSTRUCTIONS"
+MsgMenu001:	.asciz	<1>"1 "<1>"JOYSTICK"
+MsgMenu002:	.asciz	<1>"2 "<1>"MUSIC"
+MsgMenu003:	.asciz	<1>"3 "<1>"INSTRUCTIONS"
 MsgMenu000:	.asciz	<3>"0 QUIT"
-MsgLevel:	.asciz	<1>"SELECT LEVEL"
-MsgLevelA:	.asciz	<2>"A"
+MsgSelLev:	.asciz	<1>"SELECT LEVEL <A>"
+MsgSelLevA:	.asciz	<2>"A"<1>">"
 MsgPreSpace:	.asciz	<1>"PRESS "<2>"SPACE"
 MsgSpaces:	.asciz	"  "
+MsgGoldLeft:	.asciz	"GOLD LEFT"
+
 		.even
 
 	; ////////////////////////////////////////////
@@ -1616,12 +1628,12 @@ GSprUpDown:	.byte	11, 11, 09, 09, 11, 11, 09, 09, 11, 11, 09, 09
 GSprWait:	.byte	13, 13, 14, 14, 15, 15 ; only 6 - for bFrame/2
 GSprOut:	.byte	15, 15, 14, 14, 13, 13
 
-; tiles for moving into (1 - yes)
-TMovable:	.byte	1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1
+; tiles for moving into (1 - yes)                                                +--- REMO TILE
+TMovable:	.byte	1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
 ; tiles for falling through
-TFallable:	.byte	1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1
+TFallable:	.byte	1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
 ; tiles that can be temporarily destroyed by pressing space
-TDestroyable:	.byte	0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+TDestroyable:	.byte	0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 
 ; states to level addr moving (stop, left, right, up, down, fall, wait, out)
 DStateLevaddr:	.byte	0, -1, 1, -C_FIELD_DX, C_FIELD_DX, C_FIELD_DX, 0, 0
@@ -1662,61 +1674,61 @@ LevelC:		.blkb	C_FIELD_DY*C_FIELD_DX
 LevelCEnd:
 
 ; table of packed level addrs
-LevelTable:	.word	Lev0, Lev1
+LevelTable:	.word	Lev0, Lev1, Lev2, Lev3
 
 	; 1-dirt, 2,3,4-stone, 5-ladder, 6-box, 7-chain, 8-door, 9-exit
-Lev0:
-@packstart10
-	.byte	16,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 16
-	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0
-	.byte	 0,  0,  0,  1,  0,  0,  0,  0, 17,  0,  0,  8,  0,  6,  0,  1,  0,  0,  0,  0
-	.byte	 0,  0,  2,  4,  5,  2,  3,  3,  1,  1,  1,  1,  3,  4,  5,  2,  4,  0,  0,  0
-	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-@packend
-
 ;Lev0:
 ;@packstart10
-;	.byte	16,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  8,  5,  0
-;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
-;	.byte	 1,  1,  5,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  1,  1,  1,  5,  1
-;	.byte	 0,  1,  5,  0,  0,  0,  5,  1,  1,  0,  0,  0,  1,  1,  5,  0,  0,  0,  5,  6
-;	.byte	 6,  1,  5,  0,  0,  0,  5,  1,  1,  6,  6,  6,  1,  1,  5,  0,  0,  0,  5,  0
-;	.byte	 1,  1,  5,  0,  0,  0,  5,  1,  1,  1,  1,  1,  1,  1,  5,  1,  1,  1,  5,  1
-;	.byte	 0,  0,  5,  0,  0,  6,  5,  0,  0,  5,  0,  0,  0,  0,  5,  6,  0,  6,  5,  0
-;	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  6,  0,  5,  0
-;	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  5,  0,  6,  0,  0,  5,  6,  0,  6,  5,  0
-;	.byte	 5,  1,  1,  7,  7,  7,  5,  2,  4,  5,  2,  3,  3,  4,  5,  0,  0,  0,  5,  0
-;	.byte	 5,  0,  0,  0,  0,  0,  5,  0,  0,  5,  0, 17,  0,  0,  5,  7,  7,  7,  5,  0
-;	.byte	 5,  0,  0,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  5,  0
-;	.byte	 2,  4,  5,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  5,  0
-;	.byte	 0,  0,  5,  0,  0,  0,  5,  2,  3,  3,  3,  3,  3,  3,  3,  3,  3,  4,  5,  0
-;	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
-;	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
-;	.byte	 0,  0,  5,  0,  0,  0,  5,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  0
-;	.byte	 6,  6,  5,  2,  3,  3,  3,  4,  6,  6,  0,  0,  0,  0,  0,  0,  0,  0,  5,  1
+;	.byte	28,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 28
+;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  1,  0,  0,  0,  0, 29,  0,  0,  8,  0,  6,  0,  1,  0,  0,  0,  0
+;	.byte	 0,  0,  2,  4,  5,  2,  3,  3,  1,  1,  1,  1,  3,  4,  5,  2,  4,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
 ;@packend
+
+Lev0:
+@packstart10
+	.byte	28,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  8,  5,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
+	.byte	 1,  1,  5,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  1,  1,  1,  5,  1
+	.byte	 0,  1,  5,  0,  0,  0,  5,  1,  1,  0,  0,  0,  1,  1,  5,  0,  0,  0,  5,  6
+	.byte	 6,  1,  5,  0,  0,  0,  5,  1,  1,  6,  6,  6,  1,  1,  5,  0,  0,  0,  5,  0
+	.byte	 1,  1,  5,  0,  0,  0,  5,  1,  1,  1,  1,  1,  1,  1,  5,  1,  1,  1,  5,  1
+	.byte	 0,  0,  5,  0,  0,  6,  5,  0,  0,  5,  0,  0,  0,  0,  5,  6,  0,  6,  5,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  6,  0,  5,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  5,  0,  6,  0,  0,  5,  6,  0,  6,  5,  0
+	.byte	 5,  1,  1,  7,  7,  7,  5,  2,  4,  5,  2,  3,  3,  4,  5,  0,  0,  0,  5,  0
+	.byte	 5,  0,  0,  0,  0,  0,  5,  0,  0,  5,  0, 29,  0,  0,  5,  7,  7,  7,  5,  0
+	.byte	 5,  0,  0,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  5,  0
+	.byte	 2,  4,  5,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  5,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  2,  3,  3,  3,  3,  3,  3,  3,  3,  3,  4,  5,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  0
+	.byte	 6,  6,  5,  2,  3,  3,  3,  4,  6,  6,  0,  0,  0,  0,  0,  0,  0,  0,  5,  1
+@packend
 
 Lev1:
 @packstart10
-	.byte	 8,  0,  0,  0,  0, 16,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 8,  0,  0,  0,  0, 28,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
 	.byte	 0,  5,  0,  0,  0,  0,  6,  0,  6,  0,  6,  0,  0,  0,  5,  1,  0,  0,  0,  0
 	.byte	 0,  5,  0,  5,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  0,  0,  0,  0,  0
-	.byte	 7,  7,  7,  5,  0,  0,  0,  6,  6,  6,  0,  0,  0,  0,  5,  0,  6,  0,  5,  1
-	.byte	 0,  0,  0,  5,  0,  7,  7,  7,  7,  7,  7,  7,  7,  0,  5,  0,  2,  0,  5,  0
-	.byte	 0,  0,  0,  5,  0,  0,  0,  0, 17,  0,  0,  0,  0,  0,  5,  0,  0,  0,  5,  0
+	.byte	 7,  7,  7,  5,  0,  1,  1,  6,  6,  6,  0,  0,  0,  0,  5,  0,  6,  0,  5,  1
+	.byte	 0,  0,  0,  5,  0,  1,  1,  7,  7,  7,  7,  7,  7,  0,  5,  0,  2,  0,  5,  0
+	.byte	 0,  0,  0,  5,  0,  0,  0,  0, 29,  0,  0,  0,  0,  0,  5,  0,  0,  0,  5,  0
 	.byte	 0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  5,  6
 	.byte	 2,  3,  3,  3,  3,  4,  5,  0,  0,  5,  7,  7,  5,  7,  5,  0,  0,  0,  5,  0
 	.byte	 0,  0,  0,  6,  0,  6,  5,  0,  0,  5,  0,  0,  5,  0,  1,  1,  1,  1,  5,  1
@@ -1731,6 +1743,49 @@ Lev1:
 	.byte	 1,  1,  1,  1,  1,  1,  5,  0,  0,  0,  0,  5,  2,  3,  3,  3,  3,  3,  3,  4
 @packend
 
+Lev2:
+@packstart10
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  6,  0,  0,  0,  0,  6,  0,  0,  8,  5
+	.byte	 0,  0,  0,  0, 29,  0,  0,  0,  5,  2,  3,  3,  3,  3,  3,  3,  4,  0,  0,  5
+	.byte	 5,  7,  7,  7,  7,  7,  7,  7,  5,  0,  0,  0,  0,  0,  0,  0,  0,  6,  0,  5
+	.byte	 5,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5
+	.byte	 5,  0,  0,  6,  0,  6,  0,  0,  5,  1,  1,  1,  1,  1,  5,  1,  1,  1,  1,  5
+	.byte	 5,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0, 28,  0,  0,  5,  0,  0,  0,  0,  5
+	.byte	 5,  5,  1,  1,  1,  1,  1,  1,  1,  5,  0,  6,  6,  0,  5,  0,  6,  0,  0,  5
+	.byte	 5,  5,  0,  1,  6,  1,  6,  1,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  0,  5
+	.byte	 0,  5,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  0,  5
+	.byte	 0,  5,  0,  0,  0,  6,  0,  6,  0,  5,  1,  1,  1,  1,  1,  1,  1,  0,  0,  5
+	.byte	 0,  5,  5,  7,  7,  7,  0,  0,  0,  5,  0,  6,  0,  6,  0,  6,  0,  0,  0,  5
+	.byte	 0,  5,  5,  0,  0,  0,  0,  0,  0,  5,  0,  2,  3,  3,  3,  4,  0,  6,  0,  5
+	.byte	 0,  0,  5,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  0,  5
+	.byte	 7,  7,  5,  7,  7,  7,  7,  7,  7,  5,  0,  0,  0,  0,  5,  7,  7,  7,  7,  5
+	.byte	 0,  0,  5,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  0,  5
+	.byte	 0,  0,  5,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  0,  5
+	.byte	 0,  0,  5,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  7,  7,  7,  7,  7,  7,  5
+	.byte	 0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  5
+@packend
+
+Lev3:
+@packstart10
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  8,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  6,  0,  0,  0,  2,  3,  3,  3,  3,  4,  5,  6,  0,  0,  0,  0,  0,  0,  5
+	.byte	 7,  7,  7,  7,  5,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  5
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0, 28,  0,  0,  5
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  5,  2,  3,  3,  3,  4,  7,  7,  7,  7,  7
+	.byte	 1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  2,  3,  3,  3,  1,  3,  3,  3,  4
+	.byte	 0,  0,  0,  0,  6,  0,  0,  0,  0,  5,  0,  2,  4,  6,  6,  6,  2,  3,  4,  0
+	.byte	 2,  4,  5,  0,  0,  0,  5,  1,  1,  1,  2,  4,  0,  0,  2,  3,  3,  3,  4,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  5,  1,  1,  1,  5,  0,  6,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  5,  2,  4,  1,  1,  2,  3,  4,  0
+	.byte	 2,  4,  5,  0,  0,  0,  5,  1,  1,  1,  1,  5,  0,  1,  1,  1,  1,  0,  0,  0
+	.byte	 0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  1,  0,  0,  1,  0, 29,  0
+	.byte	 0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  1,  6,  6,  1,  0,  0,  0
+	.byte	 0,  0,  5,  2,  3,  3,  3,  3,  3,  3,  3,  4,  0,  1,  1,  1,  1,  0,  0,  0
+	.byte	 0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+@packend
 
 	
 	.even

@@ -18,9 +18,9 @@ textarea { width:98%; height:320px; }
 #aid_level_table td {
     border:0; padding:0;
     width:24px; height:24px;
-    background-image: url('Tiles.png');
+    background-image: url('TilesHtml.png');
     background-repeat: no-repeat;
-    background-size: 240px 48px;
+    background-size: 240px 72px;
     text-align: center;
     vertical-align: middle;
 }
@@ -217,7 +217,7 @@ function FillWithTile (yst, i)
 function CopyToText ()
 {
     let st = "";
-    for (let lev=0; lev<CGL_LEV_DY; lev++) 
+    for (let lev=gLevelY/*0*/; lev<=gLevelY/*CGL_LEV_DY*/; lev++) 
     {
         st = st + "Lev" + lev + ":\n@packstart10\n";
         for (let y=0; y<CLV_LOCAL_DY; y++) {
@@ -319,7 +319,7 @@ function InitArrays ()
 
 <div class="panel">
     <div class="center">Tiles (click)</div>
-    <img id="aid_img_tiles" src="Tiles.png" />
+    <img id="aid_img_tiles" src="TilesHtml.png" />
     <div class="hseparator"></div>
     <div class="center">Sprites (just for info)</div>
     <img id="aid_img_sprites" src="../graphics/Sprites.png" />
