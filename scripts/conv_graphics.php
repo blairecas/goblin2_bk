@@ -44,6 +44,32 @@ function GetArray ($img, $tdx, $tdy)
     return $arr;
 }
 
+
+function ImgWriteData ($fn, $cstr, $ispack, $tdx, $tdy)
+{
+    global $f;
+    echo "$fn -> $cstr\n";
+    $img = imagecreatefrompng(pathinfo(__FILE__, PATHINFO_DIRNAME)."/../graphics/".$fn);
+    if ($tdx < 0) $tdx = imagesx($img);
+    if ($tdy < 0) $tdy = imagesy($img);
+    $arr = GetArray($img, $tdx, $tdy);
+    fputs($f, "\n".$cstr.":\n");
+    if ($ispack) fputs($f, "@packstart\n");
+    for ($t=0; $t<=$arr['last']; $t++)
+    {
+	    $tile = $arr['tiles'][$t];
+    	for ($i=0, $n=0, $l=count($tile); $i<$l; $i++)
+	    {
+    	    if ($n==0) fputs($f, "\t.byte\t");
+	        fputs($f, decoct($tile[$i]));
+	        if ($n<7 && $i<($l-1)) { fputs($f, ", "); $n++; } else { fputs($f, "\n"); $n=0; }
+        }
+    }
+    if ($ispack) fputs($f, "@packend\n\n");
+}
+
+    ////////////////////////////////////////////////////////////////////////////
+
     $f = fopen(pathinfo(__FILE__, PATHINFO_DIRNAME)."/../inc_graphics.mac", "w");
 
     ////////////////////////////////////////////////////////////////////////////
@@ -106,69 +132,12 @@ function GetArray ($img, $tdx, $tdy)
     fputs($f, "\n");
 
     ////////////////////////////////////////////////////////////////////////////
-    // convert font
+    // convert other
     ////////////////////////////////////////////////////////////////////////////
-
-    $img = imagecreatefrompng(pathinfo(__FILE__, PATHINFO_DIRNAME)."/../graphics/Font6x8.png");    
-    $arr = GetArray($img, 8, 8);
-    echo "Font: ".($arr['last']+1)."\n";
-    fputs($f, "\nFontData:\n");
-    for ($t=0; $t<=$arr['last']; $t++)
-    {
-	    $tile = $arr['tiles'][$t];
-    	for ($i=0, $n=0, $l=count($tile); $i<$l; $i++)
-	    {
-    	    if ($n==0) fputs($f, "\t.byte\t");
-	        fputs($f, decoct($tile[$i]));
-	        if ($n<7 && $i<($l-1)) { fputs($f, ", "); $n++; } else { fputs($f, "\n"); $n=0; }
-        }
-    }
-    fputs($f, "\n");
-
-    ////////////////////////////////////////////////////////////////////////////
-    // convert instructions
-    ////////////////////////////////////////////////////////////////////////////
-
-    $img = imagecreatefrompng(pathinfo(__FILE__, PATHINFO_DIRNAME)."/../graphics/Instr.png");    
-    $arr = GetArray($img, 256, 256);
-    echo "Instructions: ".($arr['last']+1)."\n";
-    fputs($f, "\nInstrData:\n");
-    fputs($f, "@packstart\n");
-    for ($t=0; $t<=$arr['last']; $t++)
-    {
-	    $tile = $arr['tiles'][$t];
-    	for ($i=0, $n=0, $l=count($tile); $i<$l; $i++)
-	    {
-    	    if ($n==0) fputs($f, "\t.byte\t");
-	        fputs($f, decoct($tile[$i]));
-	        if ($n<7 && $i<($l-1)) { fputs($f, ", "); $n++; } else { fputs($f, "\n"); $n=0; }
-        }
-    }
-    fputs($f, "@packend\n\n");
-
-    ////////////////////////////////////////////////////////////////////////////
-    // convert menu picture
-    ////////////////////////////////////////////////////////////////////////////
-
-    $img = imagecreatefrompng(pathinfo(__FILE__, PATHINFO_DIRNAME)."/../graphics/Menu.png");    
-    $arr = GetArray($img, 256, 256);
-    echo "Menu: ".($arr['last']+1)."\n";
-    fputs($f, "\nMenuData:\n");
-    fputs($f, "@packstart\n");
-    for ($t=0; $t<=$arr['last']; $t++)
-    {
-	    $tile = $arr['tiles'][$t];
-    	for ($i=0, $n=0, $l=count($tile); $i<$l; $i++)
-	    {
-    	    if ($n==0) fputs($f, "\t.byte\t");
-	        fputs($f, decoct($tile[$i]));
-	        if ($n<7 && $i<($l-1)) { fputs($f, ", "); $n++; } else { fputs($f, "\n"); $n=0; }
-        }
-    }
-    fputs($f, "@packend\n\n");
-
-    ////////////////////////////////////////////////////////////////////////////
-    // end
-    ////////////////////////////////////////////////////////////////////////////
+    ImgWriteData("Font6x8.png", "FontData", false/*pack*/, 8, 8);
+    // ImgWriteData("Instr.png", "InstrData", true/*pack*/, -1, -1);
+    ImgWriteData("Menu1.png", "Menu1Data", true/*pack*/, -1, -1);
+    ImgWriteData("Menu2.png", "Menu2Data", true/*pack*/, -1, -1);
+    ImgWriteData("Badge.png", "DrbData", true/*pack*/, -1, -1);
 
     fclose($f); 

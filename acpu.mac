@@ -48,7 +48,6 @@ Start:	mtps	#200
 
 	call	SetupLVaddr				; level addrs -> vaddr table
 	call	SetupTimer				; start drawing timer ajust for BK 0010
-	clrb	bLevel
 	clrb	bGameMode
 
 ; main cycle
@@ -66,8 +65,11 @@ GameProcedures:
 MainInit:
 	call	MusicMute
 	call	FadeScreen
-	mov	#MenuData, R0
-	mov	#C_VADDR, R1
+	mov	#Menu1Data, R0
+	mov	#6.*C_SCRWID+C_VADDR, R1
+	call	Unpack
+	mov	#Menu2Data, R0
+	mov	#256.-74.*C_SCRWID+C_VADDR, R1
 	call	Unpack
 	mov	#MsgSelLev, R0
 	mov	#C_MENU_Y-016.*C_SCRWID+C_MENU_X-2+C_VADDR, R5
@@ -90,6 +92,12 @@ MainInit:
 	mov	#MsgPreSpace, R0
 	mov	#C_MENU_Y+052.*C_SCRWID+C_MENU_X+3.+C_VADDR, R5
 	call	PrintStr
+	; set game variables
+	movb	#5., bLives
+	clrb	bDrawLives
+	bicb	#3, bLevel
+	call	MenuLevel
+	; 
 	clr	bKeyCur					; (!) word command
 	movb	#C_MODE_MENU, bGameMode	
 	return
@@ -191,12 +199,15 @@ MenuJoyOnOff:
 
 ; level prepare (or win screen)
 MainPreLev:
-	call	MusicMute
+	clr	R0
+	clr	R1
+	call	MusicInit
 	call	ShowInstr
 	call	FadeScreen
 	call	LoadLevel
 	call	RemovedInit
 	call	DrawLevel
+	call	DrawBadge
 	call	ObjectsPrepare
 	clr	bFrame					; (!) also clears bFrame2
 	clr	bKeyCur					; (!) also clears bKeySpace
@@ -408,6 +419,7 @@ LevelProc:
 	call	CheckTurn
 	call	CheckSpace
 	call	RemovedProcess
+	call	CheckCollide
 	return
 
 
@@ -439,6 +451,30 @@ SetupLVaddr:
 	return
 
 
+; unpacks level data to LevelC, set empty borders (for instructions level)
+; R0 - packed level data addr
+UnpackLevel:
+	mov	#LevelC, R1
+	call	Unpack
+	; adjust unpacked
+	mov	#C_FIELD_ODX*C_FIELD_ODY+LevelC, R0	; end+1 of unpacked source
+	mov	#C_FIELD_DX*C_FIELD_DY+LevelC-C_FIELD_DX, R1	; end+2 for unpacked dest
+	mov	#C_FIELD_ODY, R3
+10$:	mov	#C_FIELD_ODX, R2
+	clrb	-(R1)
+	movb	-(R0), -(R1)
+	sob	R2, .-2
+	clrb	-(R1)
+	sob	R3, 10$
+	; clear top/bottom borders
+	mov	#LevelC, R0
+	mov	#C_FIELD_DX, R3
+20$:	clrb	C_FIELD_DY-1*C_FIELD_DX(R0)
+	clrb	(R0)+
+	sob	R3, 20$
+	return
+
+
 ; load and prepare level
 LoadLevel:
 	; clear objects
@@ -450,18 +486,7 @@ LoadLevel:
 	movb	bLevel, R0
 	asl	R0
 	mov	LevelTable(R0), R0
-	mov	#LevelC, R1
-	call	Unpack
-	; adjust unpacked
-	mov	#C_FIELD_ODX*C_FIELD_ODY+LevelC, R0	; end+1 of unpacked source
-	mov	#C_FIELD_DX*C_FIELD_DY+LevelC-C_FIELD_DX-1, R1	; end+1 for unpacked dest
-	mov	#C_FIELD_ODY, R3
-10$:	mov	#C_FIELD_ODX, R2
-	movb	-(R0), -(R1)
-	sob	R2, .-2
-	dec	R1
-	dec	R1
-	sob	R3, 10$
+	call	UnpackLevel
 	; top/bottom borders
 	mov	#LevelC, R0
 	mov	#C_FIELD_DX, R3
@@ -1042,6 +1067,37 @@ RemovedProcess:
 199$:	return
 
 
+; check ghosts colliding with player
+; C=0 collided
+CheckCollide:
+	mov	#Object, R0
+	cmp	C_OBJ_STATE(R0), #C_STATE_OUT		; not testing already out
+	beq	90$
+	mov	C_OBJ_X(R0), R1
+	mov	C_OBJ_Y(R0), R2
+	mov	#ObjectEnd, R5
+	call	50$
+	add	#ObjectEnd-Object, R5
+50$:	mov	C_OBJ_X(R5), R4				; no object?
+	beq	90$
+	sub	R1, R4					; move to player coordinates
+	cmp	R4, #C_TILE_DX
+	bge	90$
+	cmp	R4, #-C_TILE_DX
+	ble	90$
+	mov	C_OBJ_Y(R5), R4
+	sub	R2, R4
+	cmp	R4, #C_TILE_DY
+	bge	90$
+	cmp	R4, #-C_TILE_DY
+	ble	90$
+	; collided, live lost
+	decb	bLives
+	incb	bDrawLives
+	mov	#C_STATE_OUT, C_OBJ_STATE(R0)
+90$:	return
+
+
 ; //////////////////////////////////////////////////////////////////////////////
 ; // Music
 ; //////////////////////////////////////////////////////////////////////////////
@@ -1209,26 +1265,30 @@ ShowInstrA:
 	clrb	bInstrShown
 ShowInstr:
 	tstb	bInstrShown
-	bne	99$
+	bne	99$	
 	comb	bInstrShown
+	call	FadeScreen
+	mov	#LevInstr, R0
+	call	UnpackLevel
+	call	DrawLevel
 	clr	bKeyCur					; (!) word commands here
-	mov	#InstrData, R0
-	mov	#C_VADDR, R1
-	call	Unpack
 	mov	#MsgInstr00, R0
 	mov	#8.*C_SCRWID+23.+C_VADDR, R5
 	call	PrintStr
 	mov	#MsgInstr01, R0
-	mov	#76.*C_SCRWID+6.+C_VADDR, R5
+	mov	#82.*C_SCRWID+5.+C_VADDR, R5
 	call	PrintStr
 	mov	#MsgInstr02, R0
-	mov	#124.*C_SCRWID+39.+C_VADDR, R5
+	mov	#118.*C_SCRWID+41.+C_VADDR, R5
 	call	PrintStr
 	mov	#MsgInstr03, R0
-	mov	#172.*C_SCRWID+7.+C_VADDR, R5
+	mov	#154.*C_SCRWID+6.+C_VADDR, R5
 	call	PrintStr
 	mov	#MsgInstr04, R0
-	mov	#232.*C_SCRWID+36.+C_VADDR, R5
+	mov	#190.*C_SCRWID+37.+C_VADDR, R5
+	call	PrintStr2
+	mov	#MsgInstr05, R0
+	mov	#216.*C_SCRWID+2.+C_VADDR, R5
 	call	PrintStr
 10$:	tst	bKeyCur
 	beq	.-4
@@ -1240,7 +1300,34 @@ MsgInstr01:	.asciz	<1>"arrows to "<2>"move"
 MsgInstr02:	.asciz	<2>"avoid"<1>" them"
 MsgInstr03:	.asciz	<2>"collect"<1>" gold"
 MsgInstr04:	.asciz	<2>"trap"<1>" with space"
+MsgInstr05:	.ascii	<1>"Levels: "<2>"Sendik"<12>
+        	.ascii	<1>"  Code: "<2>"Blaire"<12>
+		.asciz	<1>" Music: "<2>"Mic"
+
 		.even
+
+
+; draw level & lives
+DrawBadge:
+	mov	#DrbData, R0
+	mov	#239.*C_SCRWID+C_VADDR, R1
+	call	Unpack
+	;
+	movb	bLevel, R0
+	add	#'A, R0
+	movb	R0, MsgLevel+8.
+	mov	#MsgLevel, R0
+	mov	#240.*C_SCRWID+16.+C_VADDR, R5
+	call	PrintStr
+	;
+	movb	bLives, R0
+	add	#'0, R0
+	movb	R0, MsgLives+8.
+	mov	#MsgLives, R0
+	mov	#240.*C_SCRWID+38.+C_VADDR, R5
+	call	PrintStr
+	return
+
 
 ; //////////////////////////////////////////////////////////////////////////////
 ; // Utils
@@ -1575,6 +1662,7 @@ bGameMode:	.byte	0
 bInstrShown:	.byte	0
 bLevel:		.byte	0
 bLives:		.byte	0
+bDrawLives:	.byte	0
 bGoldLeft:	.byte	0
 bNextLevel:	.byte	0
 bUseJoy:	.byte	0
@@ -1601,8 +1689,8 @@ MsgSelLev:	.asciz	<1>"SELECT LEVEL <A>"
 MsgSelLevA:	.asciz	<2>"A"<1>">"
 MsgPreSpace:	.asciz	<1>"PRESS "<2>"SPACE"
 MsgSpaces:	.asciz	"  "
-MsgGoldLeft:	.asciz	"GOLD LEFT"
-
+MsgLevel:	.asciz	<1>"LEVEL "<2>"A"
+MsgLives:	.asciz	<1>"LIVES "<2>"9"
 		.even
 
 	; ////////////////////////////////////////////
@@ -1628,10 +1716,10 @@ GSprUpDown:	.byte	11, 11, 09, 09, 11, 11, 09, 09, 11, 11, 09, 09
 GSprWait:	.byte	13, 13, 14, 14, 15, 15 ; only 6 - for bFrame/2
 GSprOut:	.byte	15, 15, 14, 14, 13, 13
 
-; tiles for moving into (1 - yes)                                                +--- REMO TILE
-TMovable:	.byte	1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+; tiles for moving into (1 - yes)                                             +--- REMO TILE
+TMovable:	.byte	1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0
 ; tiles for falling through
-TFallable:	.byte	1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+TFallable:	.byte	1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0
 ; tiles that can be temporarily destroyed by pressing space
 TDestroyable:	.byte	0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 
@@ -1673,6 +1761,31 @@ RemovedEnd:
 LevelC:		.blkb	C_FIELD_DY*C_FIELD_DX
 LevelCEnd:
 
+
+; level for instructions
+LevInstr:
+@packstart10
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0, 24,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0, 29, 22, 23,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  1,  1,  2,  3,  3,  3,  4,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 22, 22, 25,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 28,  0, 26, 27, 29,  0,  0
+	.byte	 0,  0,  0,  5,  6,  0,  0,  0,  0,  0,  0,  0,  1,  2,  3,  3,  3,  4,  1,  0
+	.byte	 0,  0,  0,  5,  2,  4,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0, 29,  5,  6,  6,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  1,  2,  3,  3,  3,  3,  4,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 26, 27, 29,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1, 28,  1,  1,  1,  1,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  2,  3,  3,  3,  3,  3,  4,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+@packend
+	.even
+
 ; table of packed level addrs
 LevelTable:	.word	Lev0, Lev1, Lev2, Lev3
 
@@ -1693,10 +1806,10 @@ LevelTable:	.word	Lev0, Lev1, Lev2, Lev3
 ;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
 ;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
 ;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
 ;@packend
 
 Lev0:
@@ -1745,8 +1858,8 @@ Lev1:
 
 Lev2:
 @packstart10
-	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  6,  0,  0,  0,  0,  6,  0,  0,  8,  5
-	.byte	 0,  0,  0,  0, 29,  0,  0,  0,  5,  2,  3,  3,  3,  3,  3,  3,  4,  0,  0,  5
+	.byte	 0,  0,  0,  0, 29,  0,  0,  0,  0,  0,  6,  0,  0,  0,  0,  6,  0,  0,  8,  5
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  5,  2,  3,  3,  3,  3,  3,  3,  4,  0,  0,  5
 	.byte	 5,  7,  7,  7,  7,  7,  7,  7,  5,  0,  0,  0,  0,  0,  0,  0,  0,  6,  0,  5
 	.byte	 5,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5
 	.byte	 5,  0,  0,  6,  0,  6,  0,  0,  5,  1,  1,  1,  1,  1,  5,  1,  1,  1,  1,  5

@@ -52,7 +52,7 @@ C_TILE_BUPLE	= 14.
 C_TILE_BUPRI	= 15.
 C_TILE_BDOLE	= 16.
 C_TILE_BDORI	= 17.
-C_TILE_REMO	= 19.				; fake 'removed' tile
+C_TILE_REMO	= 18.				; fake 'removed' tile
 C_TILE_GHOST	= 28.				; not really tile
 C_TILE_PLAYER	= 29.
 
