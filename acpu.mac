@@ -44,7 +44,7 @@ Start:	mtps	#200
 	clr	R0
 	sob	R0, .
 	tst	@#177662				; read keyboard reg just in case
-	clr	bKeyCur					; (!) also clears bKeySpace
+	clrb	bKeyCur
 
 	call	SetupLVaddr				; level addrs -> vaddr table
 	call	SetupTimer				; start drawing timer ajust for BK 0010
@@ -93,12 +93,11 @@ MainInit:
 	mov	#C_MENU_Y+052.*C_SCRWID+C_MENU_X+3.+C_VADDR, R5
 	call	PrintStr
 	; set game variables
-	movb	#5., bLives
-	clrb	bDrawLives
+	mov	#5.*16., Lives
 	bicb	#3, bLevel
 	call	MenuLevel
 	; 
-	clr	bKeyCur					; (!) word command
+	clrb	bKeyCur					; (!) word command
 	movb	#C_MODE_MENU, bGameMode	
 	return
 
@@ -112,35 +111,40 @@ MainMenu:
 	; 1
 	cmpb	bKeyCur, #C_KEY_1
 	bne	10$
+	call	MenuSound
 	jmp	JoySetup
 10$:	; 2
 	cmpb	bKeyCur, #C_KEY_2
 	bne	20$
+	clrb	bKeyCur
+	call	MenuSound
 	comb	bUseMusic
 	call	MenuMusicOnOff
-	clr	bKeyCur					; (!) word command
 	return
 20$:	; 3
 	cmpb	bKeyCur, #C_KEY_3
 	bne	30$
+	call	MenuSound
 	call	ShowInstrA
 	clrb	bGameMode
 	return
 30$:	; 0
 	cmpb	bKeyCur, #C_KEY_0
 	bne	40$
+	call	MenuSound
 	mov	@#177716, R0
 	clrb	R0
 	jmp	(R0)
 40$:	; =
-	cmpb	bKeySpace, #C_KEY_SPACE
+	cmpb	bKeyCur, #C_KEY_SPACE
 	bne	50$
 	movb	#C_MODE_PRELEV, bGameMode
 	return
 50$:	; <-
 	cmpb	bKeyCur, #C_KEY_LEFT
 	bne	60$
-	clr	bKeyCur
+	clrb	bKeyCur
+	call	MenuSound
 	movb	bLevel, R0
 ;	sub	#4., R0
 	dec	R0
@@ -151,7 +155,8 @@ MainMenu:
 60$:	; ->
 	cmpb	bKeyCur, #C_KEY_RIGHT
 	bne	99$
-	clr	bKeyCur
+	clrb	bKeyCur
+	call	MenuSound
 	movb	bLevel, R0
 ;	add	#4., R0
 	inc	R0
@@ -197,7 +202,7 @@ MenuJoyOnOff:
 	jmp	PrintStr2
 
 
-; level prepare (or win screen)
+; level prepare
 MainPreLev:
 	clr	R0
 	clr	R1
@@ -210,7 +215,7 @@ MainPreLev:
 	call	DrawBadge
 	call	ObjectsPrepare
 	clr	bFrame					; (!) also clears bFrame2
-	clr	bKeyCur					; (!) also clears bKeySpace
+	clrb	bKeyCur					; (!) word command
 	mov	#UpdTileTable, UpdTileAddr
 	movb	#C_MODE_LEVEL, bGameMode
 	return
@@ -226,6 +231,8 @@ MainLevel:
 	call	LevelProc
 	; music
 	call	MusicPlay
+	; sound
+	call	SoundProc
 	; DEBUG: output frame cycles
 	cmpb	bFrame, #4.
 	bhis	30$
@@ -243,6 +250,7 @@ MainLevel:
 
 ; game over
 MainOver:
+	call	MusicMute
 	return
 
 
@@ -410,7 +418,7 @@ LevelProc:
 	bne	110$
 	call	PStatePrepare
 	call	GStatePrepare
-110$:	; odd frame - process states
+110$:	; odd frame - all other than sprites
 	call	PStateProcess
 	call	PStateWaitOut
 	call	GStateProcess
@@ -420,6 +428,7 @@ LevelProc:
 	call	CheckSpace
 	call	RemovedProcess
 	call	CheckCollide
+	call	DrawLives
 	return
 
 
@@ -660,7 +669,7 @@ PStatePrepare:
 22$:	; check if can fall (and nothing else maaatttteeers (c))
 	call	ChkSFall
 	bcc	30$
-	; chain below - special, fall if 1) key down 2) already falling AND no key up
+	; chain below - special, fall if 1) key down 2) already falling AND no key up/enter
 	cmpb	C_FIELD_DX(R1), #C_TILE_CHAIN
 	bne	40$
 	cmpb	bKeyCur, #C_KEY_DOWN
@@ -668,6 +677,8 @@ PStatePrepare:
 	cmp	R2, #C_STATE_FALL
 	bne	40$
 	cmpb	bKeyCur, #C_KEY_UP
+	beq	40$
+	cmpb	bKeyCur, #C_KEY_ENTER
 	beq	40$
 30$:	; check for a ghost below (can't fall on ghost)
 	mov	R1, R5
@@ -730,6 +741,7 @@ PStatePrepare:
 	movb	#C_TILE_EXIT, @DoorAddr
 	mov	DoorAddr, @UpdTileAddr
 	add	#2, UpdTileAddr
+	mov	#C_SND_EXOPEN, SoundNum
 299$:	return
 
 
@@ -745,14 +757,18 @@ PStateWaitOut:
 	incb	bLevel
 	movb	#C_MODE_PRELEV, bGameMode
 	return
-10$:	; player to respawn point
+10$:	sub	#16., Lives
+	bpl	20$
+	movb	#C_MODE_OVER, bGameMode
+	return
+20$:	; player to respawn point
 	mov	#Object, R0
 	mov	C_OBJ_INITX(R0), C_OBJ_X(R0)
 	mov	C_OBJ_INITY(R0), C_OBJ_Y(R0)
 	mov	C_OBJ_INITLA(R0), C_OBJ_LEVADDR(R0)
 	mov	#C_STATE_WAIT, C_OBJ_STATE(R0)
 	mov	#C_SPR_PSPAWN1, C_OBJ_SPRITE(R0)
-90$:	clr	bKeyCur					; (!) word command
+90$:	clrb	bKeyCur
 99$:	return
 
 
@@ -982,8 +998,8 @@ TTurnTable:
 
 ; check space keypress and destroy small stone blocks if needed
 CheckSpace:
-	tstb	bKeySpace
-	beq	99$
+	cmpb	bKeyCur, #C_KEY_SPACE			; no space pressed?
+	bne	99$
 	mov	Object+C_OBJ_LEVADDR, R1
 	mov	Object+C_OBJ_STATE, R2
 	movb	DStateLevaddr(R2), R5
@@ -1012,7 +1028,8 @@ CheckSpace:
 	asl	R1
 	mov	Level2Vaddr(R1), R5
 	call	DrawTile
-	clrb	bKeySpace
+	clrb	bKeyCur
+	mov	#C_SND_REMO, SoundNum
 99$:	return
 
 
@@ -1091,9 +1108,7 @@ CheckCollide:
 	bge	90$
 	cmp	R4, #-C_TILE_DY
 	ble	90$
-	; collided, live lost
-	decb	bLives
-	incb	bDrawLives
+	; collided, player is out
 	mov	#C_STATE_OUT, C_OBJ_STATE(R0)
 90$:	return
 
@@ -1271,7 +1286,6 @@ ShowInstr:
 	mov	#LevInstr, R0
 	call	UnpackLevel
 	call	DrawLevel
-	clr	bKeyCur					; (!) word commands here
 	mov	#MsgInstr00, R0
 	mov	#8.*C_SCRWID+23.+C_VADDR, R5
 	call	PrintStr
@@ -1283,16 +1297,16 @@ ShowInstr:
 	call	PrintStr
 	mov	#MsgInstr03, R0
 	mov	#154.*C_SCRWID+6.+C_VADDR, R5
-	call	PrintStr
+	call	PrintStr2
 	mov	#MsgInstr04, R0
 	mov	#190.*C_SCRWID+37.+C_VADDR, R5
 	call	PrintStr2
 	mov	#MsgInstr05, R0
 	mov	#216.*C_SCRWID+2.+C_VADDR, R5
 	call	PrintStr
-10$:	tst	bKeyCur
+	clrb	bKeyCur
+	tstb	bKeyCur
 	beq	.-4
-	clr	bKeyCur
 99$:	return
 
 MsgInstr00:	.asciz	<2>"Instructions"
@@ -1320,12 +1334,87 @@ DrawBadge:
 	mov	#240.*C_SCRWID+16.+C_VADDR, R5
 	call	PrintStr
 	;
-	movb	bLives, R0
-	add	#'0, R0
-	movb	R0, MsgLives+8.
+	clr	CurLives				; reset rotating lives
 	mov	#MsgLives, R0
 	mov	#240.*C_SCRWID+38.+C_VADDR, R5
 	call	PrintStr
+	return
+
+
+; rotated lives drawing
+DrawLives:
+	cmp	CurLives, Lives
+	beq	99$
+	blo	10$
+	sub	#2, CurLives
+	br	20$
+10$:	add	#2, CurLives
+20$:	cmpb	bGameMode, #C_MODE_OVER			; don't draw if it's over
+	beq	99$
+	mov	CurLives, R0
+	add	#FontData+256., R0
+	mov	#240.*C_SCRWID+47.+C_VADDR, R5
+	mov	#8., R3
+	mov	#C_SCRWID-2, R2
+	mov	#^B01010101, R4
+30$:	movb	(R0)+, R1
+	bicb	R4, R1
+	movb	R1, (R5)+
+	movb	(R0)+, R1
+	bicb	R4, R1
+	movb	R1, (R5)+
+	add	R2, R5
+	sob	R3, 30$
+99$:	return
+
+
+; //////////////////////////////////////////////////////////////////////////////
+; // SOUND
+; //////////////////////////////////////////////////////////////////////////////
+
+SoundNum:	.word	0				; sound # to start play
+SoundCur:	.word	0				; current addr of playing this frame
+
+SoundProc:
+	mov	SoundNum, R0				; sound # to play
+	bne	10$					; do we have it?
+	tst	SoundCur				; or else test current frame playing addr
+	beq	99$					; nothing to play?
+	mov	SoundCur, R0
+	br	20$
+10$:	clr	SoundNum				; have sound #, clear it 
+	asl	R0					; to word
+	mov	SndTable(R0), R0			; get addr
+	beq	90$					; nothing to play?
+20$:	clr	R3
+	mov	#320, R4				; high speaker
+	mov	#220, R5				; low speaker
+30$:	bisb	(R0)+, R3
+	beq	90$					; end of sound
+	cmp	#1, R3
+	beq	80$					; end of current frame sound
+	asr	R3
+	asr	R3
+	mov	R4, @#177716
+	sob	R3, .
+	bisb	(R0)+, R3
+	beq	90$					; end of sound
+	cmp	#1, R3
+	beq	80$					; end of current frame sound
+	asr	R3
+	asr	R3
+	mov	R5, @#177716
+	sob	R3, .
+	br	30$
+80$:	mov	R0, SoundCur
+	return
+90$:	clr	SoundCur
+99$:	return
+
+
+MenuSound:
+	mov	#C_SND_MENU, SoundNum
+	call	SoundProc
 	return
 
 
@@ -1337,20 +1426,8 @@ VsyInt:	mov	#20, @#177712
 	rti
 
 Kbd274:
-KbdInt:	mov	R0, -(SP)	
-	movb	@#177662, R0
-	cmpb	R0, #40
-	bne	90$
-	movb	R0, bKeySpace
-	tstb	bKeyCur
-	beq	90$
-	br	99$
-90$:	movb	R0, bKeyCur
-99$:	mov	(SP)+, R0
+KbdInt:	movb	@#177662, bKeyCur
 	rti
-
-bKeyCur:	.byte	0
-bKeySpace:	.byte	0
 
 
 ; LFSR 8-bit random (Galois), 2^8-1 cycle
@@ -1397,8 +1474,8 @@ JoyKeys:	.word	1,  C_KEY_UP
 ; Manwe's procedure for check bad port
 TestPort14:
 	clr	R0
-	clr	bKeyCur
-10$:	tst	bKeyCur
+	clrb	bKeyCur
+10$:	tstb	bKeyCur
 	bne	90$
 	mov	@#177714, JoyBadBits
 	beq	90$
@@ -1428,16 +1505,16 @@ TestJoyPort:
 ; wait for joy input (or keypress)
 ; R0 - where to put joy input (without bad bits)
 SetJoyKey:
-	clr	bKeyCur
+	clrb	bKeyCur
 	; wait for press
-10$:	tst	bKeyCur
+10$:	tstb	bKeyCur
 	bne	99$
 	mov	@#177714, R1
 	bic	JoyBadBits, R1
 	beq	10$
 	mov	R1, (R0)
 	; wait for release
-20$:	tst	bKeyCur
+20$:	tstb	bKeyCur
 	bne	99$
 	mov	@#177714, R1
 	bic	JoyBadBits, R1
@@ -1457,15 +1534,15 @@ JoySetup:
 	call	TestJoyPort
 	add	#C_SCRWID*10., TempY
 	; set keys
-	mov	#MsgJoyTbl, -(SP)		; 4(SP) - string table addr
-	mov	#JoyKeys, -(SP)			; 2(SP) - key table addr
-	mov	#5., -(SP)			; 0(SP) - count
+	mov	#MsgJoyTbl, -(SP)			; 4(SP) - string table addr
+	mov	#JoyKeys, -(SP)				; 2(SP) - key table addr
+	mov	#5., -(SP)				; 0(SP) - count
 30$:	mov	@4(SP), R0
 	add	#2., 4(SP)
 	call	PrintStrTempY
 	mov	2(SP), R0
 	call	SetJoyKey
-	tst	bKeyCur
+	tstb	bKeyCur
 	bne	90$
 	add	#4., 2(SP)
 	dec	(SP)
@@ -1573,26 +1650,26 @@ PrintStrF:
 	mov	R1, 40$+2
 	mov	R5, -(SP)
 	mov	#C_SCRWID-1, R2
-	clr	R3			; font mask, default will be red
+	clr	R3					; font mask, default will be red
 10$:	movb	(R0)+, R1
 	beq	99$
-	cmp	R1, #3.			; is it 'color' symbol
+	cmp	R1, #3.					; is it 'color' symbol
 	bhi	20$
 	asl	R1
-	mov	PriColorsTbl(R1), R3	; change font color mask
+	mov	PriColorsTbl(R1), R3			; change font color mask
 	br	10$
-20$:	cmp	R1, #12			; is it 'newline'
+20$:	cmp	R1, #12					; is it 'newline'
 	bne	30$
 	add	#10.*C_SCRWID, (SP)
 	mov	(SP), R5
 	mov	#PriStrFir, 40$+2
 	br	10$
-30$:	sub	#32., R1		; relative to 'space'
-	asl	R1			; *16 bytes (character font size)
+30$:	sub	#32., R1				; relative to 'space'
+	asl	R1					; *16 bytes (character font size)
 	asl	R1
 	asl	R1
 	asl	R1
-	add	#FontData, R1		; R1 = font data
+	add	#FontData, R1				; R1 = font data
 40$:	call	PriStrFir
 	add	#2, R4
 	mov	R4, 40$+2
@@ -1661,13 +1738,14 @@ Unpack:	clr	R2
 bGameMode:	.byte	0
 bInstrShown:	.byte	0
 bLevel:		.byte	0
-bLives:		.byte	0
-bDrawLives:	.byte	0
 bGoldLeft:	.byte	0
 bNextLevel:	.byte	0
 bUseJoy:	.byte	0
 bUseMusic:	.byte	377
+bKeyCur:	.byte	0
 		.even
+Lives:		.word	0				; lives * 16.
+CurLives:	.word	0				; currently shown lives on screen (*16.)
 
 TimerCycle:	.word	740				; counts for one screen
 TimerLine:	.word	360				; where we start main procedure
@@ -1690,7 +1768,7 @@ MsgSelLevA:	.asciz	<2>"A"<1>">"
 MsgPreSpace:	.asciz	<1>"PRESS "<2>"SPACE"
 MsgSpaces:	.asciz	"  "
 MsgLevel:	.asciz	<1>"LEVEL "<2>"A"
-MsgLives:	.asciz	<1>"LIVES "<2>"9"
+MsgLives:	.asciz	<1>"LIVES "<2>"0"
 		.even
 
 	; ////////////////////////////////////////////
@@ -1790,49 +1868,49 @@ LevInstr:
 LevelTable:	.word	Lev0, Lev1, Lev2, Lev3
 
 	; 1-dirt, 2,3,4-stone, 5-ladder, 6-box, 7-chain, 8-door, 9-exit
-;Lev0:
-;@packstart10
-;	.byte	28,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 28
-;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  1,  0,  0,  0,  0, 29,  0,  0,  8,  0,  6,  0,  1,  0,  0,  0,  0
-;	.byte	 0,  0,  2,  4,  5,  2,  3,  3,  1,  1,  1,  1,  3,  4,  5,  2,  4,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
-;	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
-;@packend
-
 Lev0:
 @packstart10
-	.byte	28,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  8,  5,  0
-	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
-	.byte	 1,  1,  5,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  1,  1,  1,  5,  1
-	.byte	 0,  1,  5,  0,  0,  0,  5,  1,  1,  0,  0,  0,  1,  1,  5,  0,  0,  0,  5,  6
-	.byte	 6,  1,  5,  0,  0,  0,  5,  1,  1,  6,  6,  6,  1,  1,  5,  0,  0,  0,  5,  0
-	.byte	 1,  1,  5,  0,  0,  0,  5,  1,  1,  1,  1,  1,  1,  1,  5,  1,  1,  1,  5,  1
-	.byte	 0,  0,  5,  0,  0,  6,  5,  0,  0,  5,  0,  0,  0,  0,  5,  6,  0,  6,  5,  0
-	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  6,  0,  5,  0
-	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  5,  0,  6,  0,  0,  5,  6,  0,  6,  5,  0
-	.byte	 5,  1,  1,  7,  7,  7,  5,  2,  4,  5,  2,  3,  3,  4,  5,  0,  0,  0,  5,  0
-	.byte	 5,  0,  0,  0,  0,  0,  5,  0,  0,  5,  0, 29,  0,  0,  5,  7,  7,  7,  5,  0
-	.byte	 5,  0,  0,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  5,  0
-	.byte	 2,  4,  5,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  5,  0
-	.byte	 0,  0,  5,  0,  0,  0,  5,  2,  3,  3,  3,  3,  3,  3,  3,  3,  3,  4,  5,  0
-	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
-	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
-	.byte	 0,  0,  5,  0,  0,  0,  5,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  0
-	.byte	 6,  6,  5,  2,  3,  3,  3,  4,  6,  6,  0,  0,  0,  0,  0,  0,  0,  0,  5,  1
+	.byte	28,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 28
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0
+	.byte	 0,  0,  0,  1,  0,  0,  0,  0, 29,  0,  0,  8,  0,  6,  0,  1,  0,  0,  0,  0
+	.byte	 0,  0,  2,  4,  5,  2,  3,  3,  1,  1,  1,  1,  3,  4,  5,  2,  4,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
 @packend
+
+;Lev0:
+;@packstart10
+;	.byte	28,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  8,  5,  0
+;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
+;	.byte	 1,  1,  5,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  1,  1,  1,  5,  1
+;	.byte	 0,  1,  5,  0,  0,  0,  5,  1,  1,  0,  0,  0,  1,  1,  5,  0,  0,  0,  5,  6
+;	.byte	 6,  1,  5,  0,  0,  0,  5,  1,  1,  6,  6,  6,  1,  1,  5,  0,  0,  0,  5,  0
+;	.byte	 1,  1,  5,  0,  0,  0,  5,  1,  1,  1,  1,  1,  1,  1,  5,  1,  1,  1,  5,  1
+;	.byte	 0,  0,  5,  0,  0,  6,  5,  0,  0,  5,  0,  0,  0,  0,  5,  6,  0,  6,  5,  0
+;	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  6,  0,  5,  0
+;	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  5,  0,  6,  0,  0,  5,  6,  0,  6,  5,  0
+;	.byte	 5,  1,  1,  7,  7,  7,  5,  2,  4,  5,  2,  3,  3,  4,  5,  0,  0,  0,  5,  0
+;	.byte	 5,  0,  0,  0,  0,  0,  5,  0,  0,  5,  0, 29,  0,  0,  5,  7,  7,  7,  5,  0
+;	.byte	 5,  0,  0,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  5,  0
+;	.byte	 2,  4,  5,  0,  0,  0,  5,  0,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0,  5,  0
+;	.byte	 0,  0,  5,  0,  0,  0,  5,  2,  3,  3,  3,  3,  3,  3,  3,  3,  3,  4,  5,  0
+;	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
+;	.byte	 0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0
+;	.byte	 0,  0,  5,  0,  0,  0,  5,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  0
+;	.byte	 6,  6,  5,  2,  3,  3,  3,  4,  6,  6,  0,  0,  0,  0,  0,  0,  0,  0,  5,  1
+;@packend
 
 Lev1:
 @packstart10
@@ -1900,7 +1978,26 @@ Lev3:
 	.byte	 0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
 @packend
 
-	
+	.even
+
+SndTable:	
+	.word	0, Snd001, Snd002, Snd003, Snd004
+
+; simple menu sound
+Snd001:	.byte	150, 140, 130, 120, 110, 100, 0
+
+; tick sound
+Snd002:	.byte	50, 0
+
+; remove tile sound
+Snd003:	.byte	194, 79, 37, 26, 75, 25, 210
+	.byte	41, 37, 76, 26, 52, 0
+
+; exit opened 
+Snd004:	.byte	14, 84, 57, 89, 63, 95, 74, 97, 85, 105, 90, 112, 101, 116, 109
+	.byte	122, 118, 128, 125, 136, 134, 141, 142, 148, 149, 156, 157, 162
+	.byte	164, 169, 172, 176, 96, 0
+
 	.even
 
 	; //////////////////////////////////////////////////////////////////////
