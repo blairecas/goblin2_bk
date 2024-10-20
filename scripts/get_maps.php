@@ -10,7 +10,7 @@
 
     // output file
     $g = fopen(pathinfo(__FILE__, PATHINFO_DIRNAME)."/maps.mac", "w");
-    for ($map=2; $map<12; $map++)
+    for ($map=0; $map<12; $map++)
     {
         $addr = 0x1FE6 + ($map*26*15);
         // fputs($g, "Lev$map:\n@packstart10\n");
