@@ -486,7 +486,7 @@ REG_OUT:
 REG_OUT_DEVICE_MANAGE:
 	br	LEGACY_REG_OUT
 
-AY_PORT_AZBK:	
+AY_PORT_AZBK:
 	mov	#000000, R5
 	mov	#15, R1
 	movb	(R4), R0
@@ -500,24 +500,26 @@ AY_PORT_AZBK:
 	br	10$
 11$:	return
 
+TS_SELECTOR:	.word	0
+
 LEGACY_REG_OUT:
 	mov	#177714, R5
-	mov	(PC)+, (R5)
-TS_SELECTOR:	.word	0
-	mov	#362, R1
+;	mov	(PC)+, (R5)
+;TS_SELECTOR:	.word	0
+	mov	#362, R1				; 362
 	bis	(PC)+, R1
 GS_SELECTOR:	.word	0
-	movb	(R4), R0
+	movb	(R4), R0				; do not write reg #13. if data is negative
 	bmi	10$
-	mov	R1, (R5)
 	comb	R0
+	mov	R1, (R5)
 	movb	R0, (R5)
 10$: 	inc	R1
-20$: 	mov	R1, (R5)
-	movb	-(R4), R0
+20$: 	movb	-(R4), R0
 	comb	R0
+	mov	R1, (R5)
 	movb	R0, (R5)
-	incb	R1
+	inc	R1
 	bmi	20$
 	return
 
