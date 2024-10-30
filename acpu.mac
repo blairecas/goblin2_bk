@@ -207,9 +207,10 @@ MenuJoyOnOff:
 
 ; level prepare
 MainPreLev:
-	clr	R0
-	clr	R1
-	call	MusicInit
+	movb	bLevel, R0				;
+	bic	#^B1111111111111110, R0			; R0 - music #
+	clr	R1					; R1 - 0 - repeat
+	call	MusicInit				; 
 	call	ShowInstr
 	call	FadeScreen
 	call	LoadLevel

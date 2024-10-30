@@ -114,8 +114,8 @@ INTEGRATION_POINTS:
 	SEL_DEVICE:		.word 0 				; Auto selected device: 0 - legacy AY/YM or TurboSound or GryphonSound, 1 - AZBK 
 	PARAMETERS_AY1_ADDR:	.word PARAMETERS_AY1 			; Address of the operating parameters of AY1
 	AYREGS_AY1:		.word PARAMETERS_AY1 + PARAM_AYREGS	; Address of last sent AY1 register values
-	PT3FILE_MODULE1_ADDR:	.word M_Menu				; PT3 file address
-	PT3FILE_END_ADDR:	.word M_MenuEnd				; Address of end PT3 file
+	PT3FILE_MODULE1_ADDR:	.word M_Music1				; PT3 file address
+	PT3FILE_END_ADDR:	.word M_Music1End			; Address of end PT3 file
 	END_OF_PT3FILE:		.word 0 				; End of PT3 file reached (incremented by one each time)
 	NO_REPEAT_MODE:		.word 0 				; Play without repeat
 	REPETITION_NUMBER: 	.word 0 				; Number of elapsed repetitions after end of PT3 file
@@ -479,8 +479,8 @@ REG_OUT:
 	mov	CUR_PARAMS_ADDR, R0			; params addr where -2 word have our AY device address
 	mov	R0, R4					; skip to AY actual registers bytes
 	mov	-(R0), AY_PORT_AZBK+2
-	mov	-(R0), GS_SELECTOR
-	mov	-(R0), TS_SELECTOR
+	tst	-(R0)
+	tst	-(R0)
 	add	#PARAM_AYREGS+AY_ENVELOPETYPE, R4
 
 REG_OUT_DEVICE_MANAGE:
@@ -500,25 +500,27 @@ AY_PORT_AZBK:
 	br	10$
 11$:	return
 
-TS_SELECTOR:	.word	0
-
 LEGACY_REG_OUT:
 	mov	#177714, R5
-;	mov	(PC)+, (R5)
-;TS_SELECTOR:	.word	0
-	mov	#362, R1				; 362
-	bis	(PC)+, R1
-GS_SELECTOR:	.word	0
+	mov	#177762, R1				; byte 362 
 	movb	(R4), R0				; do not write reg #13. if data is negative
 	bmi	10$
 	comb	R0
 	mov	R1, (R5)
+	nop
+	nop
 	movb	R0, (R5)
+	nop
+	nop
 10$: 	inc	R1
 20$: 	movb	-(R4), R0
 	comb	R0
 	mov	R1, (R5)
+	nop
+	nop
 	movb	R0, (R5)
+	nop
+	nop
 	inc	R1
 	bmi	20$
 	return
@@ -1064,10 +1066,15 @@ PARAMETERS_AY1:
 	.even
 
 MusicTable:
-	.word	M_Menu, M_MenuEnd
+	.word	M_Music1, M_Music1End
+	.word	M_Music2, M_Music2End
 
-M_Menu:
+M_Music1:
 	@includebin ./music/mafia.pt3
-M_MenuEnd:
+M_Music1End:
+
+M_Music2:
+	@includebin ./music/other.pt3
+M_Music2End:
 
 	.end Start
