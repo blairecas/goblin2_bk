@@ -1,5 +1,7 @@
 	.title	GOBLI2
 	.enabl	LC		; do not use AMA here, contains relocatable code
+	.list	MEB
+	
 	.asect
 	.=2000			; BK-0011M - use 2000 as start addr
 

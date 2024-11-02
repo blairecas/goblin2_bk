@@ -1,4 +1,6 @@
 	.enabl	LC, AMA
+	.list	MEB
+
 	.asect
 	.=100000
 
