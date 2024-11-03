@@ -97,7 +97,7 @@ MainInit:
 	call	PrintStr
 	; set game variables
 	mov	#5.*16., Lives
-	bicb	#3, bLevel
+	clrb	bLevel
 	call	MenuLevel
 	; 
 	clrb	bKeyCur					; (!) word command
@@ -266,10 +266,45 @@ MainOver:
 	mov	#LevOver, R0
 	call	UnpackLevel
 	call	DrawLevel
+	; prepare animated ghosts
+	; scan level for them
+	clr	R4
+	mov	#LevelC, R5
+	mov	#C_FIELD_DX*C_FIELD_DY, R3
+10$:	cmpb	LevelC(R4), #C_TILE_GHOST
+	bne	20$
+	mov	R4, R0
+	asl	R0
+	mov	Level2Vaddr(R0), (R5)+			; use LevelC as buffer for ghosts vaddrs
+20$:	inc	R4
+	sob	R3, 10$
+	clr	(R5)					; put zero as end marker
+	; ghosts animation
+	mov	#100., 100$+2				; 2sec wait before keypress checking
+30$:	; wait for vsync timer
+	mov	#177710, R0
+	cmp	TimerLine, (R0)
+	bne	.-4
+	call	IncFrames
+	movb	bFrame2, R4
+	asr	R4
+	; draw ghosts tiles
+	mov	#LevelC, R5				; LevelC used as ghosts vaddrs table
+40$:	mov	(R5)+, R1				; R1 <- vaddr
+	beq	50$					; end of them
+	movb	GSprUpDown(R4), R0			; R0 <- ghost 'up/down' sprite #
+	call	DrawSTile
+	br	40$
+50$:	; need to wait for some time before keypress checking 
+	; to prevent accidentally fast keypresses
+100$:	tst	#000000
+	beq	110$
+	dec	100$+2
+	bne	30$
 	clrb	bKeyCur
-10$:	call	KeyFromJoy
+110$:	call	KeyFromJoy
 	tstb	bKeyCur
-	beq	10$
+	beq	30$
 	clrb	bGameMode
 	return
 
@@ -277,7 +312,6 @@ MainOver:
 ; you are a winner
 MainWin:
 	call	MusicMute
-
 	return
 
 
@@ -611,8 +645,8 @@ ObjectInit:
 ; do NOT modify anything except R5
 ; returns: C=1 - we can't
 ChkSLeft:	movb	-1(R1), R5			; take left side tile
-		tstb	TMovable(R5)			; check for movable
-		beq	ChkSSetC
+		bitb	#C_BIT_MOVE, TTileBits(R5)	; check for movable
+		beq	ChkSSetC			; unable to move
 		mov	#-1, R5
 ChkSClrC:	; now R5 - dvaddr for 'move to', ghosts can's move on ghost - check it
 		cmp	R0, #Object
@@ -628,14 +662,14 @@ ChkSSetC:	sec
 
 ; check going right
 ChkSRight:	movb	1(R1), R5
-		tstb	TMovable(R5)
+		bitb	#C_BIT_MOVE, TTileBits(R5)
 		beq	ChkSSetC
 		mov	#1, R5
 		br	ChkSClrC
 
 ; can climb up if: 1-have moveable above, 2-we are on ladder
 ChkSUp:		movb	-C_FIELD_DX(R1), R5
-		tstb	TMovable(R5)
+		bitb	#C_BIT_MOVE, TTileBits(R5)
 		beq	ChkSSetC
 		cmpb	(R1), #C_TILE_LADDER
 		bne	ChkSSetC
@@ -648,7 +682,7 @@ ChkSDown:	movb	C_FIELD_DX(R1), R5
 		bne	10$
 		mov	#C_FIELD_DX, R5
 		br	ChkSClrC
-10$:		tstb	TMovable(R5)
+10$:		bitb	#C_BIT_MOVE, TTileBits(R5)
 		beq	ChkSSetC		
 		cmpb	(R1), #C_TILE_LADDER
 		bne	ChkSSetC
@@ -659,7 +693,7 @@ ChkSDown:	movb	C_FIELD_DX(R1), R5
 ChkSFall:	cmpb	(R1), #C_TILE_LADDER
 		beq	ChkSSetC
 		movb	C_FIELD_DX(R1), R5
-		tstb	TFallable(R5)
+		bitb	#C_BIT_FALL, TTileBits(R5)
 		beq	ChkSSetC
 		cmp	R2, #C_STATE_WAIT
 		beq	ChkSSetC
@@ -687,6 +721,7 @@ PStatePrepare:
 09$:	return
 10$:	mov	#C_STATE_STOP, R2
 	mov	R2, C_OBJ_STATE(R0)			; set state immediately, to be sure
+	mov	#C_SPR_PLEFT1, C_OBJ_SPRITE(R0)		; and set sprite
 20$:	; check if at exit
 	cmpb	(R1), #C_TILE_EXIT
 	bne	22$
@@ -1034,7 +1069,7 @@ CheckSpace:
 	sub	R5, R1					; 'rewind' level addr to previous
 	add	#C_FIELD_DX, R1				; take block 'below'
 	movb	(R1), R5
-	tstb	TDestroyable(R5)
+	bitb	#C_BIT_DEST, TTileBits(R5)
 	beq	99$
 	; check for empty slot in 'removed' table
 	mov	#Removed, R0
@@ -1458,6 +1493,24 @@ DrawLives:
 	add	R2, R5
 	sob	R3, 30$
 99$:	return
+
+
+; draw tile from sprite data
+; R0 - #, R1 - vaddr
+DrawSTile:
+	asl	R0
+	mov	SpritesAddr(R0), R0
+	mov	#C_SCRWID-3, R2
+	mov	#C_TILE_DY, R3
+10$:	inc	R0
+	movb	(R0)+, (R1)+
+	inc	R0
+	movb	(R0)+, (R1)+
+	inc	R0
+	movb	(R0)+, (R1)+
+	add	R2, R1
+	sob	R3, 10$
+	return
 
 
 ; //////////////////////////////////////////////////////////////////////////////
@@ -1916,20 +1969,13 @@ GSprUpDown:	.byte	11, 11, 09, 09, 11, 11, 09, 09, 11, 11, 09, 09
 GSprWait:	.byte	13, 13, 14, 14, 15, 15 ; only 6 - for bFrame/2
 GSprOut:	.byte	15, 15, 14, 14, 13, 13
 
-
-; tiles for moving into (1 - yes)               
-TMovable:	.byte	1, 0, 0, 0, 0, 1, 1, 1, 1, 1
-		.byte   0, 0, 0, 0, 0, 0, 0, 0, 0, 1 ; <- dont forget about REMO tile here
-		.byte	1, 1, 1, 1, 1, 1, 1, 1, 1, 1
-; tiles for falling through
-TFallable:	.byte	1, 0, 0, 0, 0, 0, 1, 0, 1, 1
-		.byte	0, 0, 0, 0, 0, 0, 0, 0, 0, 1
-		.byte	1, 1, 1, 1, 1, 1, 1, 1, 1, 1
-
-; tiles that can be temporarily destroyed by pressing space
-TDestroyable:	.byte	0, 1, 0, 0, 0, 0, 0, 0, 0, 0
-		.byte	0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-		.byte	0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+; bit masks in table below
+C_BIT_MOVE	= 1	; moveable tile, can be walked upon
+C_BIT_FALL	= 2	; fallable tile, can fall through
+C_BIT_DEST	= 4	; tile can be destroyed with space
+TTileBits:	.byte	1+2+0, 0+0+4, 0+0+0, 0+0+0, 0+0+0, 1+0+0, 1+2+0, 1+0+0, 1+2+0, 1+2+0
+		.byte	0+0+0, 0+0+0, 0+0+0, 0+0+0, 0+0+0, 0+0+0, 0+0+0, 0+0+0, 0+0+0, 1+2+0 ; <- remo tile
+		.byte	1+2+0, 1+2+0, 1+2+0, 1+2+0, 1+2+0, 1+2+0, 1+2+0, 1+2+0, 1+2+0, 1+2+0
 
 ; states to level addr moving (stop, left, right, up, down, fall, wait, out)
 DStateLevaddr:	.byte	0, -1, 1, -C_FIELD_DX, C_FIELD_DX, C_FIELD_DX, 0, 0
