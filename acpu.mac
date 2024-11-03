@@ -74,24 +74,35 @@ MainInit:
 	mov	#Menu2Data, R0
 	mov	#256.-74.*C_SCRWID+C_VADDR, R1
 	call	Unpack
+	; select level
 	mov	#MsgSelLev, R0
 	mov	#C_MENU_Y-016.*C_SCRWID+C_MENU_X-2+C_VADDR, R5
-	call	PrintStr2
+	call	PrintStr2	
 	call	MenuLevel
+	; joystick
 	mov	#MsgMenu001, R0
 	mov	#C_MENU_Y+000.*C_SCRWID+C_MENU_X+C_VADDR, R5
 	call	PrintStr
 	call	MenuJoyOnOff
+	; music
 	mov	#MsgMenu002, R0
 	mov	#C_MENU_Y+012.*C_SCRWID+C_MENU_X+C_VADDR, R5
 	call	PrintStr
 	call	MenuMusicOnOff
+	tst	@#100					; darken this options for BK0010 (will not work anyway)
+	bne	10$
+	mov	#C_MENU_Y+012.*C_SCRWID+C_MENU_X+C_VADDR, R1
+	mov	#17., R2
+	call	DarkenVaddr
+10$:	; instructions
 	mov	#MsgMenu003, R0
 	mov	#C_MENU_Y+024.*C_SCRWID+C_MENU_X+C_VADDR, R5
 	call	PrintStr
+	; quit
 	mov	#MsgMenu000, R0
 	mov	#C_MENU_Y+036.*C_SCRWID+C_MENU_X+C_VADDR, R5
 	call	PrintStr
+	; press space
 	mov	#MsgPreSpace, R0
 	mov	#C_MENU_Y+052.*C_SCRWID+C_MENU_X+3.+C_VADDR, R5
 	call	PrintStr
@@ -279,8 +290,8 @@ MainOver:
 20$:	inc	R4
 	sob	R3, 10$
 	clr	(R5)					; put zero as end marker
-	; ghosts animation
-	mov	#100., 100$+2				; 2sec wait before keypress checking
+	; 
+	mov	#100., KeyWCheck+2			; 2sec wait before keypress checking
 30$:	; wait for vsync timer
 	mov	#177710, R0
 	cmp	TimerLine, (R0)
@@ -296,15 +307,9 @@ MainOver:
 	call	DrawSTile
 	br	40$
 50$:	; need to wait for some time before keypress checking 
-	; to prevent accidentally fast keypresses
-100$:	tst	#000000
-	beq	110$
-	dec	100$+2
-	bne	30$
-	clrb	bKeyCur
-110$:	call	KeyFromJoy
-	tstb	bKeyCur
-	beq	30$
+	; to prevent accidental keypress after game over
+	call	KeyWCheck
+	bcs	30$
 	clrb	bGameMode
 	return
 
@@ -312,6 +317,38 @@ MainOver:
 ; you are a winner
 MainWin:
 	call	MusicMute
+	call	FadeScreen
+	mov	#LevWin, R0
+	call	UnpackLevel
+	call	DrawLevel
+	mov	#100., KeyWCheck+2			; 2sec wait before keypress checking
+	mov	#2, R0					; music #
+	mov	#1, R1					; do not repeat	
+	call	MusicInit
+10$:	; wait for vsync timer
+	mov	#177710, R0
+	cmp	TimerLine, (R0)
+	bne	.-4
+	call	MusicPlay
+	call	KeyWCheck
+	bcs	10$
+	clrb	bGameMode
+	return
+
+
+; check keypress after wait some
+; put frames to wait number in KeyWCheck+2, then call this, C=0 - key was pressed
+KeyWCheck:
+	tst	#000000
+	beq	10$
+	dec	KeyWCheck+2
+	bne	30$
+	clrb	bKeyCur
+10$:	call	KeyFromJoy
+	tstb	bKeyCur
+	beq	30$
+	tst	(PC)+
+30$:	sec
 	return
 
 
@@ -1443,7 +1480,7 @@ MsgInstr03:	.asciz	<2>"collect"<1>" gold"
 MsgInstr04:	.asciz	<2>"trap"<1>" with space"
 MsgInstr05:	.ascii	<1>"Levels: "<2>"Sendik"<12>
         	.ascii	<1>"  Code: "<2>"Blaire"<12>
-		.asciz	<1>" Music: "<2>"Mic, Alos (Jnr)"
+		.asciz	<1>" Music: "<2>"Mic, Alos (Jnr), Kenotron"
 
 		.even
 
@@ -1510,6 +1547,21 @@ DrawSTile:
 	movb	(R0)+, (R1)+
 	add	R2, R1
 	sob	R3, 10$
+	return
+
+
+; darken vaddr by bic some pixels (used in non-selectable music menu for BK0010)
+; R1 - vaddr, R2 - width
+; height is 8 lines
+DarkenVaddr:
+	mov	#C_SCRWID*2, R0
+10$:	mov	#4, R3
+20$:	bicb	#^B11001100, (R1)
+	bicb	#^B00110011, C_SCRWID(R1)
+	add	R0, R1
+	sob	R3, 20$
+	sub	#8.*C_SCRWID-1, R1
+	sob	R2, 10$
 	return
 
 
@@ -2061,7 +2113,30 @@ LevOver:
 	.byte	19,  2,  4, 19, 19, 19, 19, 18, 19, 19, 19,  2,  3,  3,  4, 19, 18, 19, 19, 18
 	.byte	19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19
 	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-	.byte	 0,  0, 28, 28, 28, 28, 28,  0,  0, 29,  0,  0, 28, 28, 28, 28, 28, 28,  0,  0
+	.byte	 0,  0, 28, 28, 28, 28, 28,  0,  0,  6, 29,  0,  0, 28, 28, 28, 28, 28,  0,  0
+	.byte	 0,  2,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  4,  0
+@packend
+
+; level for win game
+LevWin:
+@packstart10
+	.byte	19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19
+	.byte	19,  2,  4, 19, 19, 19,  2,  4, 19, 19, 18, 19, 19, 19, 18, 19,  2,  3,  3,  4
+	.byte	18, 19, 19, 18, 19, 18, 19, 19, 18, 19,  2,  4, 19,  2,  4, 19, 18, 19, 19, 19
+	.byte	18, 19, 19, 19, 19, 18, 19, 19, 18, 19, 18, 19, 18, 19, 18, 19,  2,  3,  4, 19
+	.byte	18, 19,  2,  4, 19,  2,  3,  3,  4, 19, 18, 19, 19, 19, 18, 19, 18, 19, 19, 19
+	.byte	18, 19, 19, 18, 19, 18, 19, 19, 18, 19, 18, 19, 19, 19, 18, 19, 18, 19, 19, 19
+	.byte	19,  2,  4, 19, 19, 18, 19, 19, 18, 19, 18, 19, 19, 19, 18, 19,  2,  3,  3,  4
+	.byte	19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19
+	.byte	19,  2,  4, 19, 19, 18, 19, 19, 19, 18, 19,  2,  3,  3,  4, 19,  2,  3,  4, 19
+	.byte	18, 19, 19, 18, 19, 18, 19, 19, 19, 18, 19, 18, 19, 19, 19, 19, 18, 19, 19, 18
+	.byte	18, 19, 19, 18, 19, 18, 19, 19, 19, 18, 19,  2,  3,  4, 19, 19, 18, 19, 19, 18
+	.byte	18, 19, 19, 18, 19, 18, 19, 19, 19, 18, 19, 18, 19, 19, 19, 19,  2,  3,  4, 19
+	.byte	18, 19, 19, 18, 19, 19, 18, 19, 18, 19, 19, 18, 19, 19, 19, 19, 18, 19, 19, 18
+	.byte	19,  2,  4, 19, 19, 19, 19, 18, 19, 19, 19,  2,  3,  3,  4, 19, 18, 19, 19, 18
+	.byte	19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
+	.byte	 0,  0, 28, 28, 28, 28, 28,  0,  0,  6, 29,  0,  0, 28, 28, 28, 28, 28,  0,  0
 	.byte	 0,  2,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  4,  0
 @packend
 	.even
@@ -2281,7 +2356,7 @@ LevI:
 	.byte	 1,  1,  5,  1,  5,  0,  1,  0,  0,  0,  5,  0,  0, 28,  5,  0,  0,  0,  0,  0
 	.byte	 0,  0,  5,  0,  5,  0,  1,  7,  7,  7,  7,  7,  0,  0,  5,  0,  0,  0,  0,  0
 	.byte	 0,  0,  5,  0,  5,  0,  1,  0,  0,  5,  1,  1,  1,  1,  1,  1,  1,  5,  0,  0
-	.byte	 6,  0,  5,  0,  5,  0,  0,  0,  0,  5,  0, 29,  0,  0,  0,  0,  0,  5,  0,  6
+	.byte	 6,  0,  5,  0,  5,  0,  0,  0,  0,  5,  0,  0,  0, 29,  0,  0,  0,  5,  0,  6
 	.byte	 0,  0,  5,  2,  3,  3,  4,  0,  0,  5,  0,  0,  6,  0,  6,  6,  0,  5,  0,  0
 	.byte	 0,  0,  5,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0
 	.byte	 0,  0,  5,  0,  0,  0,  0,  0,  5,  2,  4,  5,  0,  0,  0,  0,  0,  5,  0,  0
@@ -2339,24 +2414,42 @@ LevK:
 
 LevL:
 @packstart10
-	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  8,  0,  0,  0,  0,  0,  0,  0,  0,  0
-	.byte	 0,  0,  0,  0,  0,  0, 28,  0,  0,  0,  5,  0,  0,  0, 28,  0,  0,  0,  0,  0
-	.byte	 5, 18,  5,  7,  7,  7,  7,  7,  7,  7, 18,  7,  7,  7,  7,  7,  7,  5,  7,  5
-	.byte	 5,  0,  5,  0,  0,  6, 18,  6,  5,  2,  3,  4,  5,  6, 18,  6,  0,  5,  0,  5
-	.byte	 5,  6,  7,  7,  5,  2,  3,  4,  5,  2,  3,  4,  5,  2,  3,  4,  0,  5,  0,  5
-	.byte	 5,  0,  0,  0,  5,  2,  3,  4,  5,  2,  3,  4,  5,  2,  3,  4,  6,  5,  6,  5
-	.byte	 5,  7,  7,  5,  7,  0,  0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  5,  0,  5
-	.byte	 5,  6,  6,  5,  0,  2,  3,  3,  4,  5,  6,  5,  2,  3,  3,  4,  7,  7,  7,  5
-	.byte	 5,  0,  0,  5,  0,  0,  2,  3,  4,  5,  6,  5,  2,  3,  4,  0,  0,  6,  0,  5
-	.byte	 5,  0,  0,  5,  0,  0,  0,  2,  4,  5,  6,  5,  2,  4,  0,  0,  0,  0,  0,  5
-	.byte	 5,  0,  0,  5,  0,  0,  0,  2,  4,  1,  1,  1,  2,  4,  0,  0, 29,  0,  0,  5
-	.byte	 5,  7,  7,  7,  7,  7,  5,  0,  2,  3,  3,  3,  4,  0,  0,  0,  0,  0,  0,  5
-	.byte	 5,  0,  0,  0,  0,  0,  5,  6,  0,  2,  3,  4,  0,  5,  7,  7,  7,  7,  7,  5
-	.byte	 5,  0,  0,  5,  7,  7,  7,  0,  0,  2,  3,  4,  0,  5,  6,  5,  7,  7,  7,  5
-	.byte	 5,  0,  0,  5,  0,  0,  6,  0,  0,  0,  0,  0,  0,  5,  0,  5,  0,  6,  0,  5
-	.byte	 5,  0,  0,  5,  7,  7,  7,  7,  7,  7,  7,  7,  7,  5,  0,  5,  0,  0,  0,  5
-	.byte	 2,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  4
-	.byte	 2,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  4
+;	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  8,  0,  0,  0,  0,  0,  0,  0,  0,  0
+;	.byte	 0,  0,  0,  0,  0,  0, 28,  0,  0,  0,  5,  0,  0,  0, 28,  0,  0,  0,  0,  0
+;	.byte	 5, 18,  5,  7,  7,  7,  7,  7,  7,  7, 18,  7,  7,  7,  7,  7,  7,  5,  7,  5
+;	.byte	 5,  0,  5,  0,  0,  6, 18,  6,  5,  2,  3,  4,  5,  6, 18,  6,  0,  5,  0,  5
+;	.byte	 5,  6,  7,  7,  5,  2,  3,  4,  5,  2,  3,  4,  5,  2,  3,  4,  0,  5,  0,  5
+;	.byte	 5,  0,  0,  0,  5,  2,  3,  4,  5,  2,  3,  4,  5,  2,  3,  4,  6,  5,  6,  5
+;	.byte	 5,  7,  7,  5,  7,  0,  0,  0,  5,  0,  0,  0,  5,  0,  0,  0,  0,  5,  0,  5
+;	.byte	 5,  6,  6,  5,  0,  2,  3,  3,  4,  5,  6,  5,  2,  3,  3,  4,  7,  7,  7,  5
+;	.byte	 5,  0,  0,  5,  0,  0,  2,  3,  4,  5,  6,  5,  2,  3,  4,  0,  0,  6,  0,  5
+;	.byte	 5,  0,  0,  5,  0,  0,  0,  2,  4,  5,  6,  5,  2,  4,  0,  0,  0,  0,  0,  5
+;	.byte	 5,  0,  0,  5,  0,  0,  0,  2,  4,  1,  1,  1,  2,  4,  0,  0, 29,  0,  0,  5
+;	.byte	 5,  7,  7,  7,  7,  7,  5,  0,  2,  3,  3,  3,  4,  0,  0,  0,  0,  0,  0,  5
+;	.byte	 5,  0,  0,  0,  0,  0,  5,  6,  0,  2,  3,  4,  0,  5,  7,  7,  7,  7,  7,  5
+;	.byte	 5,  0,  0,  5,  7,  7,  7,  0,  0,  2,  3,  4,  0,  5,  6,  5,  7,  7,  7,  5
+;	.byte	 5,  0,  0,  5,  0,  0,  6,  0,  0,  0,  0,  0,  0,  5,  0,  5,  0,  6,  0,  5
+;	.byte	 5,  0,  0,  5,  7,  7,  7,  7,  7,  7,  7,  7,  7,  5,  0,  5,  0,  0,  0,  5
+;	.byte	 2,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  4
+;	.byte	 2,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  4
+	.byte	28,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1, 28
+	.byte	 1,  1,  0,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  0,  0,  1,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  8,  5,  0,  0,  1,  0
+	.byte	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  0,  0,  6,  0, 29,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  2,  3,  4,  5,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  5,  3,  3,  4,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  1,  1,  1,  1,  1,  1,  1,  1,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  0,  0
+	.byte	 0,  0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  5,  0,  0,  1,  0
 @packend
 
 	.even

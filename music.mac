@@ -1070,6 +1070,7 @@ PARAMETERS_AY1:
 MusicTable:
 	.word	M_Music1, M_Music1End
 	.word	M_Music2, M_Music2End
+	.word	M_Music3, M_Music3End
 
 M_Music1:
 	@includebin ./music/mafia.pt3
@@ -1078,5 +1079,9 @@ M_Music1End:
 M_Music2:
 	@includebin ./music/other.pt3
 M_Music2End:
+
+M_Music3:
+	@includebin ./music/avisio.pt3
+M_Music3End:
 
 	.end Start
