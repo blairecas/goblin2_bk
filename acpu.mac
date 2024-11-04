@@ -68,6 +68,7 @@ MainInit:
 	call	StopSound
 	call	FadeScreen
 	mov	#1330, @#177664				; roll screen to 0
+	call	FadeScreen				; this is just for 'wait a bit' after scroll
 	mov	#Menu1Data, R0
 	mov	#6.*C_SCRWID+C_VADDR, R1
 	call	Unpack
@@ -178,7 +179,7 @@ MainMenu:
 62$:	movb	R0, bLevel
 	br	MenuLevel
 70$:	; cheat - win screen (first select level I)
-	cmpb	bKeyCur, #'w
+	cmpb	bKeyCur, #'W
 	bne	99$
 	clrb	bKeyCur
 	cmpb	bLevel, #8.
