@@ -1806,9 +1806,10 @@ MsgJoy011:	.asciz	<1>"Press "<2>"DOWN"
 MsgJoy012:	.asciz	<1>"Press "<2>"LEFT"
 MsgJoy013:	.asciz	<1>"Press "<2>"RIGHT"
 MsgJoy014:	.asciz	<1>"Press "<2>"FIRE"
+MsgJoy015:	.asciz	<1>"Press "<2>"STOP"
 		.even
 
-MsgJoyTbl:	.word	MsgJoy010, MsgJoy011, MsgJoy012, MsgJoy013, MsgJoy014
+MsgJoyTbl:	.word	MsgJoy010, MsgJoy011, MsgJoy012, MsgJoy013, MsgJoy014, MsgJoy015
 
 JoyPrev:	.word	0
 JoyBadBits:	.word	0
@@ -1830,7 +1831,7 @@ KeyFromJoy:
 	beq	99$
 	mov	R1, JoyPrev
 	mov	#JoyKeys, R0
-	mov	#5., R3
+	mov	#6., R3
 10$:	cmp	R1, (R0)+
 	bne	20$
 	movb	(R0), bKeyCur
@@ -1904,7 +1905,7 @@ JoySetup:
 	; set keys
 	mov	#MsgJoyTbl, -(SP)			; 4(SP) - string table addr
 	mov	#JoyKeys, -(SP)				; 2(SP) - key table addr
-	mov	#5., -(SP)				; 0(SP) - count
+	mov	#6., -(SP)				; 0(SP) - count
 30$:	mov	@4(SP), R0
 	add	#2., 4(SP)
 	call	PrintStrTempY
