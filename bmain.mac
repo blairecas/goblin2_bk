@@ -5,7 +5,7 @@
 	.asect
 	.=2000			; BK-0011M - use 2000 as start addr
 
-C_RAM_BANKS57	= ^B0001110100000000
+C_RAM_BANKS51	= ^B0001100000000000
 
 C_LDR_LENGTH	= LoaderEnd - Loader
 C_LDR_START	= 40000 - C_LDR_LENGTH
@@ -18,8 +18,8 @@ Start:	mtps	#200
 	cmpb	@#177717, #300
 	bne	10$
 
-	; for 11(M) unpack music to bank #7
-	mov	#C_RAM_BANKS57, @#177716
+	; for 11(M) unpack music to bank #1
+	mov	#C_RAM_BANKS51, @#177716
 	mov	#MusicBin, R0
 	mov	#100000, R1
 	call	Unpack

@@ -15,7 +15,7 @@ Start:	mtps	#200
 	; check for BK 0011(M)
 	cmpb	@#177717, #300
 	bne	10$
-	mov	#C_RAM_BANKS57, @#177716		; banks 5 7
+	mov	#C_RAM_BANKS51, @#177716		; banks 5 1
 	clrb	@#177663				; vsync on, screen buf 5, palette 0
 	mov	#VsyInt, @#100
 	mov	#200, @#102
@@ -2126,7 +2126,7 @@ MsgOff:		.asciz	<1>"OFF"
 MsgMenu001:	.asciz	<1>"1 "<1>"JOYSTICK"
 MsgMenu002:	.asciz	<1>"2 "<1>"MUSIC"
 MsgMenu003:	.asciz	<1>"3 "<1>"INSTRUCTIONS"
-MsgMenu000:	.asciz	<3>"0 QUIT"
+MsgMenu000:	.asciz	<3>"0 RESET"
 MsgSelLev:	.asciz	<1>"SELECT LEVEL <A>"
 MsgSelLevA:	.asciz	<2>"A"<1>">"
 MsgPreSpace:	.asciz	<1>"PRESS "<2>"SPACE"
