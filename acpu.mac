@@ -21,9 +21,7 @@ Start:	mtps	#200
 	mov	#200, @#102
 	mov	#1200, TimerCycle
 	mov	#120, TimerLine
-	clr	R0
-	clr	R1
-	call	MusicInit
+	call	MusicMute
 10$:	; clear ram
 	mov	#End, R0
 	mov	#100000-End/2, R3
@@ -64,7 +62,7 @@ GameProcedures:
 
 ; prepare menu
 MainInit:
-	call	MusicMute
+	call	MenuMusicInit
 	call	StopSound
 	call	FadeScreen
 	mov	#1330, @#177664				; roll screen to 0
@@ -123,10 +121,12 @@ MainMenu:
 	mov	#177710, R0
 	cmp	TimerLine, (R0)
 	bne	.-4
+	call	MusicPlay
 	call	KeyFromJoy
 	; 1
 	cmpb	bKeyCur, #C_KEY_1
 	bne	10$
+	call	MusicMute
 	jmp	JoySetup
 10$:	; 2 (only for BK0011)
 	cmpb	bKeyCur, #C_KEY_2
@@ -135,12 +135,17 @@ MainMenu:
 	tst	@#100
 	beq	20$
 	call	MenuSound
-	comb	bUseMusic
-	call	MenuMusicOnOff
+	call	MusicMute
+	incb	bUseMusic
+	cmpb	bUseMusic, #3
+	blo	18$
+	clrb	bUseMusic
+18$:	call	MenuMusicOnOff
 	return
 20$:	; 3
 	cmpb	bKeyCur, #C_KEY_3
 	bne	30$
+	call	MusicMute
 	call	ShowInstrA
 	clrb	bGameMode
 	return
@@ -150,7 +155,7 @@ MainMenu:
 	mov	@#177716, R0
 	clrb	R0
 	jmp	(R0)
-40$:	; =
+40$:	; Space
 	cmpb	bKeyCur, #C_KEY_SPACE
 	bne	50$
 	movb	#C_MODE_PRELEV, bGameMode
@@ -202,14 +207,23 @@ MenuLevel:
 	return
 
 
+; init menu music
+MenuMusicInit:
+	mov	#3, R0					; music #
+	clr	R1					; repeat
+	call	MusicInit
+	return
+
+MenuMusT:	.word	MsgOff, MsgOn, Msg2Ay
+
 ; show music on/off switch
 MenuMusicOnOff:
-	mov	#MsgOn, R0
-	tstb	bUseMusic
-	bne	10$
-	mov	#MsgOff, R0
-10$:	mov	#C_MENU_Y+012.*C_SCRWID+C_MENU_X+12.+C_VADDR, R5
-	jmp	PrintStr
+	movb	bUseMusic, R0
+	asl	R0
+	mov	MenuMusT(R0), R0
+	mov	#C_MENU_Y+012.*C_SCRWID+C_MENU_X+12.+C_VADDR, R5
+	call	PrintStr
+	br	MenuMusicInit
 
 
 ; show joy on/off switch
@@ -1421,9 +1435,13 @@ MusicChk:
 	return
 
 ; R0 - music # (0..2), R1 - 0-repeat, <>0-no repeat
+; upper bit in R0 = 1 - prevent TS detection (1AY)
 MusicInit:
 	call	MusicChk
-	jmp	@#100000
+	cmpb	#1, bUseMusic
+	bne	10$
+	bis	#100000, R0
+10$:	jmp	@#100000
 
 ; call this every frame after init
 MusicPlay:
@@ -1613,7 +1631,7 @@ MsgInstr03:	.asciz	<2>"collect"<1>" gold"
 MsgInstr04:	.asciz	<2>"trap"<1>" with space"
 MsgInstr05:	.ascii	<1>"Levels: "<2>"Sendik"<12>
         	.ascii	<1>"  Code: "<2>"Blaire"<12>
-		.asciz	<1>" Music: "<2>"Mic, Alos (Jnr), Kenotron"
+		.asciz	<1>" Music: "<2>"Mic, Alos(Jnr), Kenotron, Reddie"
 
 		.even
 
@@ -2123,6 +2141,7 @@ UpdTileTable:	.blkw	6				; max 6 tiles to update (isnt much?)
 
 MsgOn:		.asciz	<2>"ON "
 MsgOff:		.asciz	<1>"OFF"
+Msg2Ay:		.asciz	<2>"2AY"
 MsgMenu001:	.asciz	<1>"1 "<1>"JOYSTICK"
 MsgMenu002:	.asciz	<1>"2 "<1>"MUSIC"
 MsgMenu003:	.asciz	<1>"3 "<1>"INSTRUCTIONS"

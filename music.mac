@@ -23,6 +23,7 @@ StopDetect:
 ; https://csi.pdp-11.ru/
 
 	AY_1_PORT_AZBK = 177172
+	AY_2_PORT_AZBK = 177174 
 
 	AY_TONA = 0
 	AY_TONB = 2
@@ -113,24 +114,44 @@ StopDetect:
 
 INTEGRATION_POINTS:
 	FRAME_NUMBER:		.word 0 				; Incremented by one each time the PLAY entry point is accessed
+	TS_PRESENT:		.word 0 				; TS sign
 	SEL_DEVICE:		.word 0 				; Auto selected device: 0 - legacy AY/YM or TurboSound or GryphonSound, 1 - AZBK 
 	PARAMETERS_AY1_ADDR:	.word PARAMETERS_AY1 			; Address of the operating parameters of AY1
+	PARAMETERS_AY2_ADDR:	.word PARAMETERS_AY2 			; Address of the operating parameters of AY2
 	AYREGS_AY1:		.word PARAMETERS_AY1 + PARAM_AYREGS	; Address of last sent AY1 register values
+	AYREGS_AY2:		.word PARAMETERS_AY2 + PARAM_AYREGS	; Address of last sent AY2 register values
 	PT3FILE_MODULE1_ADDR:	.word M_Music1				; PT3 file address
+	PT3FILE_MODULE2_ADDR:	.word 0 				; Address of module 2 (TS) in PT3 file 
 	PT3FILE_END_ADDR:	.word M_Music1End			; Address of end PT3 file
 	END_OF_PT3FILE:		.word 0 				; End of PT3 file reached (incremented by one each time)
 	NO_REPEAT_MODE:		.word 0 				; Play without repeat
 	REPETITION_NUMBER: 	.word 0 				; Number of elapsed repetitions after end of PT3 file
 	CUR_PARAMS_ADDR:	.word 0
 
+
+; TS check
+TS_ID:	.ascii	"PT3!PT3!02TS"
+TS_ID_END:
+TS_ID_CHECK:
+	mov	#4, R4
+10$:	cmpb	-(R0), -(R2)
+	bne	11$
+	sob	R4, 10$
+11$:	return
+
+NoTS:	.word	0
+
 ; Initialization of pt3 module 
 ; R0 = song #
 ; R1 = 0 - repeat, 1 - no repeat
-Init:	asl	R0
+Init:	clr	NoTS				; prevent TS detect flag
+	asl	R0
+	rol	NoTS
 	asl	R0
 	mov	MusicTable(R0), PT3FILE_MODULE1_ADDR
 	mov	MusicTable+2(R0), PT3FILE_END_ADDR
 	mov	R1, NO_REPEAT_MODE
+	call	Mute				; screws R4
 
 	; AZ device detect start
 	mov	@#4, -(SP)
@@ -139,21 +160,57 @@ Init:	asl	R0
 	movb	R0, @#AY_1_PORT_AZBK
 	mov	(SP)+, @#4
 	tst	R0
-	bne	10$
+	bne	20$
 	mov	#240, REG_OUT_DEVICE_MANAGE 	; NOP code = 240
-10$:	; AZ device detect ends here
+20$:	; AZ device detect ends here
 
+	clr	TS_PRESENT 
 	clr	SEL_DEVICE
 	clr	FRAME_NUMBER
 	clr	END_OF_PT3FILE
+	clr	PT3FILE_MODULE2_ADDR 
 	clr	REPETITION_NUMBER
 
 	mov	#PARAM_DEVICES_AY1, R3	
-InNext:	clr	(R3)+				; legacy #1
+	clr	(R3)+				; legacy #1
 	mov	#100000, (R3)+			; gsound #1
 	mov	#AY_1_PORT_AZBK, (R3)+		; AZBK #1
 	mov	PT3FILE_MODULE1_ADDR, R1
 
+	; prevent TS detect?	
+	tst	NoTS
+	bne	InitNext
+
+TS_DETECT:
+	mov	PT3FILE_END_ADDR, R0
+	mov	#TS_ID_END, R2
+	call	TS_ID_CHECK
+	bne	InitNext
+	sub	#2, R0				; SKIP LENGTH OF SECOND MODULE
+	call	TS_ID_CHECK
+	bne	InitNext
+	clr	R5				; GET OFFSET TO SECOND MODULE
+	bisb	-(R0), R5
+	swab	R5
+	bisb	-(R0), R5
+	add	PT3FILE_MODULE1_ADDR, R5 	; GET ADDRESS OF SECOND MODULE
+	call	TS_ID_CHECK
+	bne	InitNext
+
+	; have TS
+	inc	TS_PRESENT
+
+	mov	R5, -(SP)
+	call	InitNext
+	mov	(SP)+, R1
+
+	mov	R1, PT3FILE_MODULE2_ADDR
+	mov	#PARAM_DEVICES_AY2, R3
+	mov	#1, (R3)+			; legacy #2
+	mov	#40000, (R3)+			; gsound #2
+	mov	#AY_2_PORT_AZBK, (R3)+		; AZBK #2 
+
+InitNext:
 	mov	R3, CUR_PARAMS_ADDR
 	mov	R1, PARAM_MODULE_ADDRESS(R3)
 	mov	R1, R5  
@@ -366,6 +423,11 @@ MULTY_SUBR:
 
 Play:	inc	FRAME_NUMBER
 	mov	#PARAMETERS_AY1, R4
+	tst	TS_PRESENT
+	beq	PlayNext
+	call	PlayNext
+	mov	#PARAMETERS_AY2, R4 
+PlayNext:
 	mov	R4, CUR_PARAMS_ADDR
 	clr	PARAM_ADDTOENVELOPE(R4)
 	clrb	PARAM_AYREGS + AY_MIXER(R4)
@@ -481,8 +543,8 @@ REG_OUT:
 	mov	CUR_PARAMS_ADDR, R0			; params addr where -2 word have our AY device address
 	mov	R0, R4					; skip to AY actual registers bytes
 	mov	-(R0), AY_PORT_AZBK+2
-	tst	-(R0)
-	tst	-(R0)
+	mov	-(R0), GS_SELECTOR
+	mov	-(R0), TS_SELECTOR
 	add	#PARAM_AYREGS+AY_ENVELOPETYPE, R4
 
 REG_OUT_DEVICE_MANAGE:
@@ -504,31 +566,30 @@ AY_PORT_AZBK:
 
 LEGACY_REG_OUT:
 	mov	#177714, R5
-	mov	#177762, R1				; byte 362 
-	movb	(R4), R0				; do not write reg #13. if data is negative
+	mov	(PC)+, (R5)
+TS_SELECTOR:	.word	0
+	mov	#362, R1
+	bis	(PC)+, R1
+GS_SELECTOR:	.word	0
+	movb	(R4), R0
 	bmi	10$
-	comb	R0
 	mov	R1, (R5)
-	nop
-	nop
+	comb	R0
 	movb	R0, (R5)
-	nop
-	nop
 10$: 	inc	R1
-20$: 	movb	-(R4), R0
+20$: 	mov	R1, (R5)
+	movb	-(R4), R0
 	comb	R0
-	mov	R1, (R5)
-	nop
-	nop
 	movb	R0, (R5)
-	nop
-	nop
-	inc	R1
+	incb	R1
 	bmi	20$
-	return
+	return 
 
 MUTE:	inc	END_OF_PT3FILE				; just in case
 	mov	#PARAMETERS_AY1, R4
+	call	MUTE_NEXT
+	mov	#PARAMETERS_AY2, R4
+MUTE_NEXT:
 	mov	R4, CUR_PARAMS_ADDR
 	clr	PARAM_AYREGS + AY_AMPLITUDEA(R4)
 	clrb	PARAM_AYREGS + AY_AMPLITUDEC(R4)
@@ -1066,11 +1127,17 @@ PARAM_DEVICES_AY1:
 PARAMETERS_AY1:
 	.blkb	PARAM_SIZE
 	.even
-
+PARAM_DEVICES_AY2:
+	.word	0, 0, 0
+PARAMETERS_AY2:
+	.blkb	PARAM_SIZE
+	.even 
+ 
 MusicTable:
 	.word	M_Music1, M_Music1End
 	.word	M_Music2, M_Music2End
 	.word	M_Music3, M_Music3End
+	.word	M_Music4, M_Music4End
 
 M_Music1:
 	@includebin ./music/mafia.pt3
@@ -1083,5 +1150,9 @@ M_Music2End:
 M_Music3:
 	@includebin ./music/avisio.pt3
 M_Music3End:
+
+M_Music4:
+	@includebin ./music/reddie2.pt3
+M_Music4End:
 
 	.end Start
