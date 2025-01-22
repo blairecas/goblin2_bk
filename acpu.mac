@@ -7,9 +7,19 @@
 
 @include common.mac
 
-Start:	mtps	#200
-	mov	#1000, SP
-	mov	SP, @#4
+Start:	; backup sys 
+	mov	#Backup, R0
+	mov	@#004, (R0)+
+	mov	@#060, (R0)+
+	mov	@#062, (R0)+
+	mov	@#274, (R0)+
+	mov	@#276, (R0)+
+	mov	@#100, (R0)+
+	mov	@#102, (R0)+
+	mov	#Stop, @#4
+Stop:	; start from pressing stop
+	mtps	#200
+	mov	#776, SP
 	clr	@#100					; use this addr as flag for BK 0010
 	mov	#200, @#177716				; speaker DC to low (not high?)
 	; check for BK 0011(M)
@@ -149,12 +159,23 @@ MainMenu:
 	call	ShowInstrA
 	clrb	bGameMode
 	return
-30$:	; 0
+30$:	; 0 // // // EXIT EXIT EXIT 
 	cmpb	bKeyCur, #C_KEY_0
 	bne	40$
-	mov	@#177716, R0
-	clrb	R0
-	jmp	(R0)
+	mtps	#200				; no way you, interrupts!
+	call	MusicMute			; no music
+	mov	#Backup, R0			; restore sys addrs
+	mov	(R0)+, @#004
+	mov	(R0)+, @#060
+	mov	(R0)+, @#062
+	mov	(R0)+, @#274
+	mov	(R0)+, @#276
+	mov	(R0)+, @#100
+	mov	(R0)+, @#102
+	mov	#776, SP			; stack to exit
+	mtps	#0				; exit then
+	return					; +
+	; /////////////////////////
 40$:	; Space
 	cmpb	bKeyCur, #C_KEY_SPACE
 	bne	50$
@@ -2116,6 +2137,8 @@ Unpack:	clr	R2
 ; //////////////////////////////////////////////////////////////////////////////
 ; // Data
 ; //////////////////////////////////////////////////////////////////////////////
+
+Backup:		.blkw	7
 
 bGameMode:	.byte	0
 bInstrShown:	.byte	0
