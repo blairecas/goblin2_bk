@@ -1897,12 +1897,17 @@ TestJoyPort:
 ; R0 - where to put joy input (without bad bits)
 SetJoyKey:
 	clrb	bKeyCur
+	mov	JoyTempDD, R2
 	; wait for press
 10$:	tstb	bKeyCur
 	bne	99$
 	mov	@#177714, R1
 	bic	JoyBadBits, R1
 	beq	10$
+	; check for double press
+	bis	R1, R2
+	cmp	JoyTempDD, R2
+	beq	10$	
 	mov	R1, (R0)
 	; wait for release
 20$:	tstb	bKeyCur
@@ -1910,6 +1915,7 @@ SetJoyKey:
 	mov	@#177714, R1
 	bic	JoyBadBits, R1
 	bne	20$
+	mov	R2, JoyTempDD
 99$:	return
 
 
@@ -1924,6 +1930,9 @@ JoySetup:
 	add	#C_SCRWID*10., TempY
 	call	TestJoyPort
 	add	#C_SCRWID*10., TempY
+	; for double press detection
+JoyTempDD =: .+2
+	clr	#000000
 	; set keys
 	mov	#MsgJoyTbl, -(SP)			; 4(SP) - string table addr
 	mov	#JoyKeys, -(SP)				; 2(SP) - key table addr
